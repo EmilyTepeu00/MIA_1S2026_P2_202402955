@@ -277,3 +277,145 @@ textarea::-webkit-scrollbar-thumb {
 textarea::-webkit-scrollbar-thumb:hover {
   background: #1a2b4c;
 }
+
+
+/* ----- LOGIN ----- */
+.login-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  min-height: 100vh;
+  background: linear-gradient(135deg, #1a2b4c 0%, #2c3e6e 100%);
+}
+
+.login-card {
+  background: white;
+  border-radius: 24px;
+  padding: 2.5rem;
+  width: 100%;
+  max-width: 400px;
+  box-shadow: 0 20px 40px rgba(0, 0, 0, 0.2);
+}
+
+.login-card h1 {
+  text-align: center;
+  margin-bottom: 2rem;
+  color: #1a2b4c;
+}
+
+.login-card .form-group {
+  margin-bottom: 1.5rem;
+}
+
+.login-card label {
+  display: block;
+  margin-bottom: 0.5rem;
+  font-weight: 500;
+  color: #1a2b4c;
+}
+
+.login-card input {
+  width: 100%;
+  padding: 0.8rem;
+  border: 2px solid #e2e8f0;
+  border-radius: 12px;
+  font-size: 1rem;
+  transition: border-color 0.2s;
+}
+
+.login-card input:focus {
+  outline: none;
+  border-color: #6b9ac4;
+}
+
+.login-card button {
+  width: 100%;
+  background: linear-gradient(135deg, #1a2b4c 0%, #2c3e6e 100%);
+  color: white;
+  padding: 1rem;
+  font-size: 1rem;
+  border-radius: 12px;
+}
+
+.login-card .error-message {
+  background: #fee2e2;
+  color: #dc2626;
+  padding: 0.8rem;
+  border-radius: 12px;
+  margin-bottom: 1rem;
+  text-align: center;
+}
+
+
+/* ----- EXPLORADOR Y JOURNAL ----- */
+.explorer-container, .journal-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.explorer-header, .journal-header {
+  background: white;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.explorer-header h1, .journal-header h1 {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.user-info {
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+}
+
+.user-info button {
+  background: #dc2626;
+  padding: 0.5rem 1.2rem;
+}
+
+.user-info button:hover {
+  background: #b91c1c;
+}
+
+.explorer-content, .journal-content {
+  padding: 2rem;
+}
+
+.placeholder-message {
+  text-align: center;
+  font-size: 1.2rem;
+  color: #6b7280;
+  padding: 3rem;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.nav-buttons {
+  display: flex;
+  justify-content: flex-end;
+  gap: 1rem;
+  margin-bottom: 1.5rem;
+}
+
+.nav-buttons button {
+  background: #6b9ac4;
+  padding: 0.6rem 1.2rem;
+}
+
+.nav-buttons button:hover {
+  background: #1a2b4c;
+}
+
+.logout-btn {
+  background: #dc2626 !important;
+}
+
+.logout-btn:hover {
+  background: #b91c1c !important;
+}

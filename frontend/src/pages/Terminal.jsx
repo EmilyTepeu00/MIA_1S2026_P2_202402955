@@ -1,10 +1,5 @@
-// FRONTEND - App.jsx
 import React, { useState } from 'react';
-import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
-import './App.css';
-import Login from './pages/Login';
-import Explorer from './pages/Explorer';
-import Journal from './pages/Journal';
+import { useNavigate } from 'react-router-dom';
 
 function Terminal() {
   // Estados para los textareas
@@ -12,7 +7,7 @@ function Terminal() {
   const [salida, setSalida] = useState('');
   const navigate = useNavigate();
 
-  // Funcion para ejecutar comandos
+  // EJECUTAR COMANDOS
   const ejecutarComandos = async () => {
     try {
       setSalida('Enviando comandos al backend...');
@@ -48,7 +43,7 @@ function Terminal() {
     }
   };
 
-  // Funcion para cargar archivo .smia
+  // PARA CARGAR ARCHIVO .smia
   const cargarScript = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -60,7 +55,7 @@ function Terminal() {
     }
   };
 
-  // FUNCIONES DE NAVEGACION
+  // NAVEGACION
   const irAExplorador = () => navigate('/explorer');
   const irAJournal = () => navigate('/journal');
   
@@ -80,11 +75,10 @@ function Terminal() {
     <div className="app">
       <h1>Proyecto 2: [C++Disk 2.0]</h1>
       
-      {/* Botones de navegacion */}
       <div className="nav-buttons">
         <button onClick={irAExplorador}>Explorador</button>
         <button onClick={irAJournal}>Journaling</button>
-        <button onClick={cerrarSesion} className="logout-btn">Cerrar Sesión</button>
+        <button onClick={cerrarSesion} className="logout-btn">Cerrar Sesion</button>
       </div>
       
       <div className="container">
@@ -128,35 +122,4 @@ function Terminal() {
   );
 }
 
-// COMPONENTE PRINCIPAL CON RUTAS
-function App() {
-  // Verificar si hay sesion activa
-  const isAuthenticated = localStorage.getItem('sesion_activa') === 'true';
-
-  return (
-    <Routes>
-      {/* Pagina de login */}
-      <Route path="/login" element={<Login />} />
-      
-      {/* Terminal (requiere sesion) */}
-      <Route path="/terminal" element={
-        isAuthenticated ? <Terminal /> : <Navigate to="/login" />
-      } />
-      
-      {/* Explorador (requiere sesion) */}
-      <Route path="/explorer" element={
-        isAuthenticated ? <Explorer /> : <Navigate to="/login" />
-      } />
-      
-      {/* Journaling (requiere sesion) */}
-      <Route path="/journal" element={
-        isAuthenticated ? <Journal /> : <Navigate to="/login" />
-      } />
-      
-      {/* Ruta por defecto */}
-      <Route path="/" element={<Navigate to="/login" />} />
-    </Routes>
-  );
-}
-
-export default App;
+export default Terminal;
