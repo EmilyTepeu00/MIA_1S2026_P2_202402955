@@ -3,7 +3,9 @@ import React, { useState } from 'react';
 import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
 import './App.css';
 import Login from './pages/Login';
-import Explorer from './pages/Explorer';
+import SeleccionarDisco from './pages/SeleccionarDisco';
+import SeleccionarParticion from './pages/SeleccionarParticion';
+import ExploradorArchivos from './pages/ExploradorArchivos';
 import Journal from './pages/Journal';
 
 function Terminal() {
@@ -61,7 +63,7 @@ function Terminal() {
   };
 
   // FUNCIONES DE NAVEGACION
-  const irAExplorador = () => navigate('/explorer');
+  const irAExplorador = () => navigate('/seleccionar-disco');
   const irAJournal = () => navigate('/journal');
   
   const cerrarSesion = async () => {
@@ -143,9 +145,19 @@ function App() {
         isAuthenticated ? <Terminal /> : <Navigate to="/login" />
       } />
       
-      {/* Explorador (requiere sesion) */}
-      <Route path="/explorer" element={
-        isAuthenticated ? <Explorer /> : <Navigate to="/login" />
+      {/* Seleccionar Disco (requiere sesion) */}
+      <Route path="/seleccionar-disco" element={
+        isAuthenticated ? <SeleccionarDisco /> : <Navigate to="/login" />
+      } />
+      
+      {/* Seleccionar Particion (requiere sesion) */}
+      <Route path="/seleccionar-particion" element={
+        isAuthenticated ? <SeleccionarParticion /> : <Navigate to="/login" />
+      } />
+      
+      {/* Explorador de Archivos (requiere sesion) */}
+      <Route path="/explorador-archivos" element={
+        isAuthenticated ? <ExploradorArchivos /> : <Navigate to="/login" />
       } />
       
       {/* Journaling (requiere sesion) */}

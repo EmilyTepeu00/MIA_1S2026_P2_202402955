@@ -3695,6 +3695,45 @@ string loginWeb(string user, string pass, string id) {
     return "ERROR: Usuario o contrasena incorrectos";
 }
 
+// --- FUNCION: obtenerDiscos ---
+string obtenerDiscos() {
+    stringstream res;
+    res << "[";
+    
+    // Buscar archivos .mia en la carpeta discos
+    string comando = "ls ../discos/*.mia 2>/dev/null";
+    char buffer[128];
+    string resultado = "";
+    FILE* pipe = popen(comando.c_str(), "r");
+    if (!pipe) {
+        return "[]";
+    }
+    while (fgets(buffer, sizeof(buffer), pipe) != NULL) {
+        resultado += buffer;
+    }
+    pclose(pipe);
+    
+    // Parsear resultado
+    stringstream ss(resultado);
+    string linea;
+    vector<string> discos;
+    while (getline(ss, linea)) {
+        if (!linea.empty()) {
+            // Quitar salto de linea
+            linea.pop_back();
+            discos.push_back(linea);
+        }
+    }
+    
+    for (int i = 0; i < discos.size(); i++) {
+        res << "\"" << discos[i] << "\"";
+        if (i < discos.size() - 1) res << ",";
+    }
+    
+    res << "]";
+    return res.str();
+}
+
 // MAIN CON CORS 
 int main() {
     crow::SimpleApp app;
@@ -3745,6 +3784,15 @@ int main() {
             respuesta["resultado"] = resultado;
             
             return crow::response(respuesta);
+        });
+
+    // Ruta GET para obtener lista de discos
+    CROW_ROUTE(app, "/obtenerDiscos")
+        .methods("GET"_method)([](){
+            string discos = obtenerDiscos();
+            crow::json::wvalue respuesta;
+            respuesta["discos"] = crow::json::load(discos);
+            return respuesta;
         });
     
     // Ruta GET /ping

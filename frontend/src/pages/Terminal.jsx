@@ -56,7 +56,7 @@ function Terminal() {
   };
 
   // NAVEGACION
-  const irAExplorador = () => navigate('/explorer');
+  const irAExplorador = () => navigate('/seleccionar-disco');
   const irAJournal = () => navigate('/journal');
   
   const cerrarSesion = async () => {

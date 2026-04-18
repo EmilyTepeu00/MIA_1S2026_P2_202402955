@@ -242,7 +242,7 @@ button {
   }
 }
 
-/* Animaciones */
+/* ========== ANIMACIONES ========== */
 @keyframes fadeIn {
   from {
     opacity: 0;
@@ -258,7 +258,7 @@ button {
   animation: fadeIn 0.5s ease-out;
 }
 
-/* Scroll */
+/* ========== SCROLL ========== */
 textarea::-webkit-scrollbar {
   width: 12px;
 }
@@ -279,7 +279,7 @@ textarea::-webkit-scrollbar-thumb:hover {
 }
 
 
-/* ----- LOGIN ----- */
+/* ========== LOGIN ========== */
 .login-container {
   display: flex;
   justify-content: center;
@@ -347,7 +347,7 @@ textarea::-webkit-scrollbar-thumb:hover {
 }
 
 
-/* ----- EXPLORADOR Y JOURNAL ----- */
+/* ========== EXPLORADOR Y JOURNAL ========== */
 .explorer-container, .journal-container {
   min-height: 100vh;
   background: #f5f7fa;
@@ -418,4 +418,100 @@ textarea::-webkit-scrollbar-thumb:hover {
 
 .logout-btn:hover {
   background: #b91c1c !important;
+}
+
+
+/* ========== SELECCION DE DISCOS ========== */
+.seleccionar-disco-container, .seleccionar-particion-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.seleccionar-disco-header, .seleccionar-particion-header {
+  background: white;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.discos-lista, .particiones-lista {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 1.5rem;
+  padding: 2rem;
+}
+
+.disco-tarjeta, .particion-tarjeta {
+  background: white;
+  border-radius: 16px;
+  padding: 1.5rem;
+  cursor: pointer;
+  transition: transform 0.2s, box-shadow 0.2s;
+  border: 1px solid #e2e8f0;
+}
+
+.disco-tarjeta:hover, .particion-tarjeta:hover {
+  transform: translateY(-4px);
+  box-shadow: 0 10px 30px rgba(0, 0, 0, 0.1);
+}
+
+.disco-ruta {
+  font-size: 0.85rem;
+  color: #6b7280;
+  word-break: break-all;
+  margin-top: 0.5rem;
+}
+
+/* ========== EXPLORADOR DE ARCHIVOS ========== */
+.explorador-archivos-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.explorador-archivos-header {
+  background: white;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.ruta-actual {
+  background: #e2e8f0;
+  padding: 0.75rem 1.5rem;
+  margin: 1rem 2rem;
+  border-radius: 12px;
+  font-family: monospace;
+}
+
+/* ========== JOURNALING ========== */
+.journaling-container {
+  min-height: 100vh;
+  background: #f5f7fa;
+}
+
+.journaling-header {
+  background: white;
+  padding: 1rem 2rem;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.1);
+}
+
+.journaling-contenido {
+  padding: 2rem;
+}
+
+.mensaje-placeholder {
+  text-align: center;
+  font-size: 1.2rem;
+  color: #6b7280;
+  padding: 3rem;
+  background: white;
+  border-radius: 16px;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
