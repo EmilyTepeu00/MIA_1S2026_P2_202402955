@@ -3636,6 +3636,64 @@ string procesar_comando(const string& comando) {
     return "ERROR: Comando no reconocido: '" + comando + "'. Comandos disponibles: mkdisk, rmdisk";
 }
 
+// --- FUNCION: loginWeb (para login desde interfaz grafica) ---
+string loginWeb(string user, string pass, string id) {
+    // 1. Buscar particion montada por ID
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) {
+        return "ERROR: No existe particion montada con ID: " + id;
+    }
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // 2. Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // 3. Leer users.txt
+    string users = leerArchivo(m.path_disco, sb.s_inode_start, sb.s_block_start, sb.s_bm_block_start, sb.s_blocks_count, "/users.txt");
+    
+    // 4. Buscar usuario en el archivo
+    stringstream ss(users);
+    string linea;
+    
+    while (getline(ss, linea)) {
+        if (linea.empty()) continue;
+        
+        vector<string> partes;
+        stringstream ss2(linea);
+        string parte;
+        while (getline(ss2, parte, ',')) {
+            partes.push_back(parte);
+        }
+        
+        // Formato: UID,U,GID,USER,PASS
+        if (partes.size() >= 5 && partes[1] == "U" && partes[3] == user && partes[4] == pass) {
+            sesion_actual.activa = true;
+            sesion_actual.id_particion = id;
+            sesion_actual.usuario = user;
+            try {
+                sesion_actual.uid = stoi(partes[0]);
+                sesion_actual.gid = stoi(partes[2]);
+            } catch (...) {
+                sesion_actual.uid = -1;
+                sesion_actual.gid = -1;
+            }
+            return "LOGIN: Sesion iniciada como " + user;
+        }
+    }
+    
+    return "ERROR: Usuario o contrasena incorrectos";
+}
 
 // MAIN CON CORS 
 int main() {
@@ -3668,6 +3726,26 @@ int main() {
         res.add_header("Access-Control-Allow-Origin", "*");
         return res;
     });
+
+    // Ruta POST para login desde interfaz grafica
+    CROW_ROUTE(app, "/loginWeb")
+        .methods("POST"_method)([](const crow::request& req){
+            auto body = crow::json::load(req.body);
+            if (!body) {
+                return crow::response(400, "JSON invalido");
+            }
+            
+            string user = body["user"].s();
+            string pass = body["pass"].s();
+            string id = body["id"].s();
+            
+            string resultado = loginWeb(user, pass, id);
+            
+            crow::json::wvalue respuesta;
+            respuesta["resultado"] = resultado;
+            
+            return crow::response(respuesta);
+        });
     
     // Ruta GET /ping
     CROW_ROUTE(app, "/ping").methods("GET"_method)([]() {
