@@ -3927,6 +3927,65 @@ string listarDirectorio(string id, string ruta) {
     return resultado.str();
 }
 
+// --- FUNCION: obtenerJournalEntradas ---
+string obtenerJournalEntradas(string id) {
+    // Buscar particion montada
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) {
+        return "ERROR: Particion no encontrada";
+    }
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Leer superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Verificar que sea EXT3
+    if (sb.s_filesystem_type != 3) {
+        return "ERROR: La particion no es EXT3, no tiene journaling";
+    }
+    
+    // Leer todas las entradas del journal
+    stringstream resultado;
+    resultado << "Operacion|Path|Contenido|Fecha\n";
+    
+    ifstream disco(m.path_disco, ios::binary);
+    if (!disco.is_open()) {
+        return "ERROR: No se pudo abrir el disco";
+    }
+    
+    for (int i = 0; i < sb.s_inodes_count; i++) {
+        Journal journal;
+        disco.seekg(m.part_start + sizeof(Superblock) + (i * sizeof(Journal)));
+        disco.read(reinterpret_cast<char*>(&journal), sizeof(Journal));
+        
+        if (journal.j_count == 1) {
+            char fecha[30];
+            time_t t = (time_t)journal.j_content.i_date;
+            struct tm* tm_info = localtime(&t);
+            strftime(fecha, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+            
+            resultado << journal.j_content.i_operation << "|"
+                     << journal.j_content.i_path << "|"
+                     << journal.j_content.i_content << "|"
+                     << fecha << "\n";
+        }
+    }
+    
+    disco.close();
+    return resultado.str();
+}
+
 // MAIN CON CORS 
 int main() {
     crow::SimpleApp app;
@@ -4019,6 +4078,21 @@ int main() {
         crow::response res("Backend funcionando");
         res.add_header("Access-Control-Allow-Origin", "*");
         return res;
+    });
+
+    // Ruta para obtener entradas del journal
+    CROW_ROUTE(app, "/api/obtenerJournal").methods("POST"_method)([](const crow::request& req){
+        auto body = crow::json::load(req.body);
+        if (!body) {
+            return crow::response(400, "JSON invalido");
+        }
+        
+        string id = body["id"].s();
+        string resultado = obtenerJournalEntradas(id);
+        
+        crow::json::wvalue respuesta;
+        respuesta["contenido"] = resultado;
+        return crow::response(respuesta);
     });
     
     // Mostar Info
