@@ -537,3 +537,59 @@ textarea::-webkit-scrollbar-thumb:hover {
 .login-btn:hover {
   background: #16a34a !important;
 }
+
+
+/* ========== EXPLORADOR DE ARCHIVOS ========== */
+.contenido-lista {
+  padding: 2rem;
+}
+
+.tabla-archivos {
+  width: 100%;
+  border-collapse: collapse;
+  background: white;
+  border-radius: 16px;
+  overflow: hidden;
+  box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
+}
+
+.tabla-archivos th,
+.tabla-archivos td {
+  padding: 0.75rem 1rem;
+  text-align: left;
+  border-bottom: 1px solid #e2e8f0;
+}
+
+.tabla-archivos th {
+  background: #f8fafc;
+  font-weight: 600;
+  color: #1a2b4c;
+}
+
+.carpeta-fila {
+  cursor: pointer;
+  background-color: #f0f9ff;
+}
+
+.carpeta-fila:hover {
+  background-color: #e0f2fe;
+}
+
+.archivo-fila {
+  cursor: default;
+}
+
+.subir-btn {
+  background: #6b9ac4;
+  padding: 0.3rem 0.8rem;
+  margin-left: 1rem;
+  font-size: 0.8rem;
+}
+
+.vacio {
+  text-align: center;
+  padding: 3rem;
+  background: white;
+  border-radius: 16px;
+  color: #6b7280;
+}

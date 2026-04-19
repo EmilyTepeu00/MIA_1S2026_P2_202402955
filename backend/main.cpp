@@ -3734,6 +3734,53 @@ string obtenerDiscos() {
     return res.str();
 }
 
+// --- FUNCION: listarDirectorio ---
+string listarDirectorio(string id, string ruta) {
+    // 1. Buscar particion montada por ID
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) {
+        return "ERROR: No existe particion montada con ID: " + id;
+    }
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // 2. Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // 3. Obtener el reporte LS
+    string path_temp = "/tmp/ls_temp.txt";
+    string comando = "rep -name=ls -path=" + path_temp + " -path_file_ls=\"" + ruta + "\" -id=" + id;
+    procesar_comando(comando);
+    
+    // 4. Leer el archivo temporal
+    ifstream archivo(path_temp);
+    if (!archivo.is_open()) {
+        return "ERROR: No se pudo generar el listado";
+    }
+    
+    string contenido;
+    string linea;
+    while (getline(archivo, linea)) {
+        contenido += linea + "\n";
+    }
+    archivo.close();
+    
+    // Eliminar archivo temporal
+    remove(path_temp.c_str());
+    
+    return contenido;
+}
+
 // MAIN CON CORS 
 int main() {
     crow::SimpleApp app;
@@ -3785,6 +3832,25 @@ int main() {
             
             return crow::response(respuesta);
         });
+
+    // Ruta POST para listar directorio
+    CROW_ROUTE(app, "/listarDirectorio")
+        .methods("POST"_method)([](const crow::request& req){
+            auto body = crow::json::load(req.body);
+            if (!body) {
+                return crow::response(400, "JSON invalido");
+            }
+            
+            string id = body["id"].s();
+            string ruta = body["ruta"].s();
+            
+            string resultado = listarDirectorio(id, ruta);
+            
+            crow::json::wvalue respuesta;
+            respuesta["contenido"] = resultado;
+            
+            return crow::response(respuesta);
+        });    
 
     // Ruta GET para obtener lista de discos
     CROW_ROUTE(app, "/obtenerDiscos")
