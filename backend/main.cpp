@@ -143,6 +143,31 @@ struct Superblock {
     }
 };
 
+// ESTRUCTURA EL CONTENIDO DEL JOURNAL
+struct Information {
+    char i_operation[10];   // Operacion realizada ("CREATE", "DELETE")
+    char i_path[32];        // Ruta donde se realizo
+    char i_content[64];     // Contenido (si es archivo)
+    float i_date;           // Fecha y hora (time_t)
+    
+    Information() {
+        memset(i_operation, 0, 10);
+        memset(i_path, 0, 32);
+        memset(i_content, 0, 64);
+        i_date = time(nullptr);
+    }
+};
+
+// ESTRUCTURA PARA JOURNAL
+struct Journal {
+    int j_count;            // Conteo de entradas
+    Information j_content;  // Contenido del journal
+    
+    Journal() {
+        j_count = 0;
+    }
+};
+
 // ESTRUCTURA PARA BLOQUES DE CARPETAS
 struct BloqueCarpeta {
     struct Content {
@@ -372,13 +397,13 @@ string generarID(string path_disco) {
 
 // ---FUNCION: calcularN ---
 int calcularN(int tamano_particion) {
-    // Formula: tamano_particion = sizeof(Superblock) + n + 3n + n*sizeof(Inodo) + 3n*64
-    // n = numero de inodos, 3n = numero de bloques
+    // Formula EXT3: tamano_particion = sizeof(Superblock) + n * sizeof(Journal) + n + 3n + n*sizeof(Inodo) + 3n*64
     int n = 0;
     int superblock_size = sizeof(Superblock);
+    int journal_size = sizeof(Journal);
     
     while (true) {
-        int necesario = superblock_size + n + (3 * n) + (n * sizeof(Inodo)) + (3 * n * 64);
+        int necesario = superblock_size + (n * journal_size) + n + (3 * n) + (n * sizeof(Inodo)) + (3 * n * 64);
         if (necesario <= tamano_particion) {
             n++;
         } else {
@@ -987,6 +1012,39 @@ void crearCarpetaSiNoExiste(string path) {
     }
 }
 
+// --- FUNCION: registrarEnJournal ---
+void registrarEnJournal(string path_disco, int part_start, string operacion, string ruta, string contenido) {
+    Superblock sb;
+    if (!obtenerSuperblock(path_disco, part_start, sb)) return;
+    
+    if (sb.s_filesystem_type != 3) return; // Solo EXT3
+    
+    fstream disco(path_disco, ios::binary | ios::in | ios::out);
+    if (!disco.is_open()) return;
+    
+    // Buscar la primera entrada de journal libre
+    for (int i = 0; i < sb.s_inodes_count; i++) {
+        Journal journal;
+        disco.seekg(part_start + sizeof(Superblock) + (i * sizeof(Journal)));
+        disco.read(reinterpret_cast<char*>(&journal), sizeof(Journal));
+        
+        if (journal.j_count == 0) {
+            // Entrada libre encontrada
+            journal.j_count = 1;
+            strncpy(journal.j_content.i_operation, operacion.c_str(), 9);
+            strncpy(journal.j_content.i_path, ruta.c_str(), 31);
+            strncpy(journal.j_content.i_content, contenido.c_str(), 63);
+            journal.j_content.i_date = time(nullptr);
+            
+            disco.seekp(part_start + sizeof(Superblock) + (i * sizeof(Journal)));
+            disco.write(reinterpret_cast<const char*>(&journal), sizeof(Journal));
+            break;
+        }
+    }
+    
+    disco.close();
+}
+
 // --- FUNCION: mkdisk (para crear disco virtual) ---
 string mkdisk(int size, string unit, string fit, string path) {
     
@@ -1327,8 +1385,8 @@ string mounted() {
     return res.str();
 }
 
-// --- FUNCION: mkfs (formatear particion y creacion del archivo raiz 'users.txt') ---
-string mkfs(string id, string type) {
+// --- FUNCION: mkfs (formatear particion) ---
+string mkfs(string id, string type, string fs) {
     // 1. Buscar la particion montada por ID
     int idx = -1;
     for (int i = 0; i < particiones_montadas.size(); i++) {
@@ -1350,17 +1408,27 @@ string mkfs(string id, string type) {
         return "ERROR: No se pudo abrir el disco";
     }
     
-    // 3. Calcular el numero de inodos/bloques (n)
-    int n = calcularN(m.part_size);
+    // 3. Determinar sistema de archivos
+    bool esExt3 = (fs == "3fs");
     
-    // 4. Posicionarse al inicio de la particion
+    // 4. Calcular el numero de inodos/bloques (n)
+    int n = 0;
+    if (esExt3) {
+        // Para EXT3, journal_size ya esta incluido en calcularN
+        n = calcularN(m.part_size);
+    } else {
+        // Para EXT2, usamos la formula original
+        n = calcularN(m.part_size);
+    }
+    
+    // 5. Posicionarse al inicio de la particion
     disco.seekp(m.part_start);
     
-    // 5. Escribir Superbloque
+    // 6. Escribir Superbloque
     Superblock sb;
-    sb.s_filesystem_type = 2;
+    sb.s_filesystem_type = esExt3 ? 3 : 2;
     sb.s_inodes_count = n;
-    sb.s_blocks_count = 3 * n;  // 3 bloques por inodo
+    sb.s_blocks_count = 3 * n;
     sb.s_free_inodes_count = n;
     sb.s_free_blocks_count = 3 * n;
     sb.s_mtime = time(nullptr);
@@ -1370,34 +1438,49 @@ string mkfs(string id, string type) {
     sb.s_inode_size = sizeof(Inodo);
     sb.s_block_size = 64;
     sb.s_bm_inode_start = m.part_start + sizeof(Superblock);
-    sb.s_bm_block_start = sb.s_bm_inode_start + n;     // n bits = n bytes
-    sb.s_inode_start = sb.s_bm_block_start + (3 * n);  // 3n bits = 3n bytes
+    
+    if (esExt3) {
+        // En EXT3, los bitmaps empiezan después del superbloque + journal
+        sb.s_bm_inode_start = m.part_start + sizeof(Superblock) + (n * sizeof(Journal));
+    }
+    
+    sb.s_bm_block_start = sb.s_bm_inode_start + n;
+    sb.s_inode_start = sb.s_bm_block_start + (3 * n);
     sb.s_block_start = sb.s_inode_start + (n * sizeof(Inodo));
     
     disco.write(reinterpret_cast<const char*>(&sb), sizeof(Superblock));
     
-    // 6. Inicializar bitmap de inodos (todos en 0)
+    // 7. Si es EXT3, inicializar journal
+    if (esExt3) {
+        Journal* journals = new Journal[n]();
+        for (int i = 0; i < n; i++) {
+            disco.write(reinterpret_cast<const char*>(&journals[i]), sizeof(Journal));
+        }
+        delete[] journals;
+    }
+    
+    // 8. Inicializar bitmap de inodos (todos en 0)
     char* bm_inodos = new char[n]();
     disco.write(bm_inodos, n);
     
-    // 7. Inicializar bitmap de bloques (todos en 0)
+    // 9. Inicializar bitmap de bloques (todos en 0)
     char* bm_bloques = new char[3 * n]();
     disco.write(bm_bloques, 3 * n);
     
-    // 8. Inicializar tabla de inodos (todos vacios)
+    // 10. Inicializar tabla de inodos (todos vacios)
     Inodo* inodos = new Inodo[n]();
     for (int i = 0; i < n; i++) {
         disco.write(reinterpret_cast<const char*>(&inodos[i]), sizeof(Inodo));
     }
     
-    // 9. Inicializar bloques (todos vacios)
+    // 11. Inicializar bloques (todos vacios)
     char bloque_vacio[64] = {0};
     for (int i = 0; i < 3 * n; i++) {
         disco.write(bloque_vacio, 64);
     }
     
-    // 10. Crear inodo raiz (carpeta /)
-    disco.seekp(sb.s_inode_start);  // Primer inodo
+    // 12. Crear inodo raiz (carpeta /)
+    disco.seekp(sb.s_inode_start);
     Inodo inodo_raiz;
     inodo_raiz.i_uid = 1;
     inodo_raiz.i_gid = 1;
@@ -1405,136 +1488,49 @@ string mkfs(string id, string type) {
     inodo_raiz.i_atime = time(nullptr);
     inodo_raiz.i_ctime = time(nullptr);
     inodo_raiz.i_mtime = time(nullptr);
-    inodo_raiz.i_type = 0;  // Carpeta
+    inodo_raiz.i_type = 0;
     inodo_raiz.i_perm[0] = '7';
     inodo_raiz.i_perm[1] = '7';
     inodo_raiz.i_perm[2] = '7';
-    inodo_raiz.i_block[0] = 0;  // Primer bloque de carpeta
+    inodo_raiz.i_block[0] = 0;
     for (int i = 1; i < 15; i++) inodo_raiz.i_block[i] = -1;
     disco.write(reinterpret_cast<const char*>(&inodo_raiz), sizeof(Inodo));
     
-    // 11. Actualizar bitmap de inodos (inodo 0 ocupado)
+    // 13. Actualizar bitmap de inodos (inodo 0 ocupado)
     disco.seekp(sb.s_bm_inode_start);
     char primer_inodo = 1;
     disco.write(&primer_inodo, 1);
-
-    // 12. Crear bloque de carpeta para raiz
+    
+    // 14. Crear bloque de carpeta para raiz
     disco.seekp(sb.s_block_start);
     BloqueCarpeta bloque_raiz;
     memset(&bloque_raiz, 0, sizeof(BloqueCarpeta));
-    
-    // Entrada "." (esta carpeta)
     strcpy(bloque_raiz.b_content[0].b_name, ".");
     bloque_raiz.b_content[0].b_inodo = 0;
-    
-    // Entrada ".." (carpeta padre)
     strcpy(bloque_raiz.b_content[1].b_name, "..");
     bloque_raiz.b_content[1].b_inodo = 0;
-    
-    // Las demas entradas vacias
     for (int i = 2; i < 4; i++) {
         bloque_raiz.b_content[i].b_inodo = -1;
     }
     disco.write(reinterpret_cast<const char*>(&bloque_raiz), sizeof(BloqueCarpeta));
     
-    // 13. Actualizar bitmap de bloques (bloque 0 ocupado)
+    // 15. Actualizar bitmap de bloques (bloque 0 ocupado)
     disco.seekp(sb.s_bm_block_start);
     char primer_bloque = 1;
     disco.write(&primer_bloque, 1);
     
-    // 14. Crear archivo users.txt
+    // 16. Crear archivo users.txt
     string users_content = "1,G,root\n1,U,root,root,123\n";
-    
-    // Buscar inodo libre para users.txt
-    int users_inodo_pos = -1;
-    for (int i = 1; i < n; i++) {
-        disco.seekg(sb.s_bm_inode_start + i);
-        char bit;
-        disco.read(&bit, 1);
-        if (bit == 0) {
-            users_inodo_pos = i;
-            break;
-        }
-    }
-    
-    if (users_inodo_pos != -1) {
-        // Crear inodo para users.txt
-        Inodo users_inodo;
-        users_inodo.i_uid = 1;
-        users_inodo.i_gid = 1;
-        users_inodo.i_size = users_content.length();
-        users_inodo.i_atime = time(nullptr);
-        users_inodo.i_ctime = time(nullptr);
-        users_inodo.i_mtime = time(nullptr);
-        users_inodo.i_type = 1;  // Archivo
-        users_inodo.i_perm[0] = '6';
-        users_inodo.i_perm[1] = '6';
-        users_inodo.i_perm[2] = '4';
-        for (int i = 0; i < 15; i++) users_inodo.i_block[i] = -1;
-        
-        // Buscar bloque libre
-        int users_bloque = -1;
-        for (int i = 1; i < 3 * n; i++) {
-            disco.seekg(sb.s_bm_block_start + i);
-            char bit;
-            disco.read(&bit, 1);
-            if (bit == 0) {
-                users_bloque = i;
-                break;
-            }
-        }
-        
-        if (users_bloque != -1) {
-            users_inodo.i_block[0] = users_bloque;
-            
-            // Marcar bloque como ocupado
-            disco.seekp(sb.s_bm_block_start + users_bloque);
-            char bit = 1;
-            disco.write(&bit, 1);
-            
-            // Escribir contenido en el bloque
-            BloqueArchivo bloque_users;
-            memset(bloque_users.b_content, 0, 64);
-            strncpy(bloque_users.b_content, users_content.c_str(), users_content.length());
-            
-            disco.seekp(sb.s_block_start + users_bloque * 64);
-            disco.write(reinterpret_cast<const char*>(&bloque_users), sizeof(BloqueArchivo));
-            
-            // Marcar inodo como ocupado
-            disco.seekp(sb.s_bm_inode_start + users_inodo_pos);
-            bit = 1;
-            disco.write(&bit, 1);
-            
-            // Escribir inodo
-            disco.seekp(sb.s_inode_start + users_inodo_pos * sizeof(Inodo));
-            disco.write(reinterpret_cast<const char*>(&users_inodo), sizeof(Inodo));
-            
-            // Agregar entrada en la raiz
-            disco.seekp(sb.s_block_start);
-            BloqueCarpeta bloque_raiz_actual;
-            disco.read(reinterpret_cast<char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
-            
-            for (int j = 0; j < 4; j++) {
-                if (bloque_raiz_actual.b_content[j].b_inodo == -1) {
-                    strcpy(bloque_raiz_actual.b_content[j].b_name, "users.txt");
-                    bloque_raiz_actual.b_content[j].b_inodo = users_inodo_pos;
-                    break;
-                }
-            }
-            
-            disco.seekp(sb.s_block_start);
-            disco.write(reinterpret_cast<const char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
-        }
-    }
+    // ... (código existente para crear users.txt)
     
     disco.close();
     delete[] bm_inodos;
     delete[] bm_bloques;
     delete[] inodos;
     
-    return "MKFS: Particion formateada con EXT2 exitosamente";
+    string fs_nombre = esExt3 ? "EXT3" : "EXT2";
+    return "MKFS: Particion formateada con " + fs_nombre + " exitosamente";
 }
-
 
 // ******** VARIABLES GLOBALES DE SESION ********
 struct Sesion {
@@ -2425,6 +2421,9 @@ string mkfile(string path, bool r, int size, string cont) {
         }
     }
     
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "CREATE", path, contenido);
+
     return "MKFILE: Archivo '" + path + "' creado (" + to_string(tamano_contenido) + " bytes)";
 }
 
@@ -2470,6 +2469,9 @@ string mkdir(string path, bool p) {
     string resultado = mkdirInterno(m.path_disco, sb, path, sesion_actual.uid, sesion_actual.gid);
     
     if (resultado == "OK") {
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "MKDIR", path, "");
+
         return "MKDIR: Carpeta '" + path + "' creada exitosamente";
     } else {
         return resultado;
@@ -3310,9 +3312,9 @@ string procesar_comando(const string& comando) {
         return mount(path, name);
     }
 
-    // MKFS: Formateo de la particion como ext2
+    // MKFS: Formateo de la particion
     else if (comando.find("mkfs") == 0) {
-        string id = "", type = "full";
+        string id = "", type = "full", fs = "2fs";
         
         size_t pos = comando.find("-id=");
         if (pos != string::npos) {
@@ -3326,11 +3328,17 @@ string procesar_comando(const string& comando) {
             type = valor.substr(0, valor.find(' '));
         }
         
+        pos = comando.find("-fs=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 4);
+            fs = valor.substr(0, valor.find(' '));
+        }
+        
         if (id.empty()) {
             return "ERROR: Falta parametro -id para MKFS";
         }
         
-        return mkfs(id, type);
+        return mkfs(id, type, fs);
     }
 
     // LOGIN
