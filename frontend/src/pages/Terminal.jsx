@@ -7,7 +7,13 @@ function Terminal() {
   const [salida, setSalida] = useState('');
   const navigate = useNavigate();
 
-  // EJECUTAR COMANDOS
+  // Verificar sesion al cargar
+  console.log('=== TERMINAL CARGADA ===');
+  console.log('Sesion activa:', localStorage.getItem('sesion_activa'));
+  console.log('Usuario:', localStorage.getItem('usuario'));
+  console.log('ID Particion:', localStorage.getItem('id_particion'));
+
+  // Funcion para ejecutar comandos
   const ejecutarComandos = async () => {
     try {
       setSalida('Enviando comandos al backend...');
@@ -57,7 +63,10 @@ function Terminal() {
 
   // FUNCIONES DE NAVEGACION
   const irALogin = () => navigate('/login');
-  const irAExplorador = () => navigate('/seleccionar-disco');
+  const irAExplorador = () => {
+    console.log('Click en Explorador - Navegando a /seleccionar-disco');
+    navigate('/seleccionar-disco');
+  };
   const irAJournal = () => navigate('/journal');
   
   const cerrarSesion = async () => {
@@ -69,18 +78,19 @@ function Terminal() {
     localStorage.removeItem('sesion_activa');
     localStorage.removeItem('usuario');
     localStorage.removeItem('id_particion');
-    // Actualizar UI
+    console.log('Sesion cerrada');
     window.location.reload();
   };
 
   // Verificar si hay sesion activa
   const isAuthenticated = localStorage.getItem('sesion_activa') === 'true';
+  console.log('isAuthenticated:', isAuthenticated);
 
   return (
     <div className="app">
       <h1>Proyecto 2: [C++Disk 2.0]</h1>
       
-      {/* BOTONES DE NAVEGACION */}
+      {/* Botones de navegacion */}
       <div className="nav-buttons">
         {!isAuthenticated ? (
           <button onClick={irALogin} className="login-btn">Iniciar Sesion</button>

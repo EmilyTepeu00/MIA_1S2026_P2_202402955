@@ -8,6 +8,14 @@ function SeleccionarDisco() {
   const navigate = useNavigate();
 
   useEffect(() => {
+    console.log('=== SELECCIONAR DISCO CARGADA ===');
+    const sesion = localStorage.getItem('sesion_activa');
+    console.log('Sesion activa en SeleccionarDisco:', sesion);
+    if (sesion !== 'true') {
+      console.log('No hay sesion, redirigiendo a login');
+      navigate('/login');
+      return;
+    }
     cargarDiscos();
   }, []);
 
@@ -15,6 +23,7 @@ function SeleccionarDisco() {
     try {
       const response = await fetch('/api/obtenerDiscos');
       const data = await response.json();
+      console.log('Discos recibidos:', data.discos);
       setDiscos(data.discos || []);
     } catch (err) {
       setError('Error al cargar discos');
@@ -24,6 +33,8 @@ function SeleccionarDisco() {
   };
 
   const seleccionarDisco = (discoPath) => {
+    console.log('Disco seleccionado (original):', discoPath);
+    // Guardar la ruta completa
     localStorage.setItem('discoSeleccionado', discoPath);
     navigate('/seleccionar-particion');
   };
@@ -51,7 +62,7 @@ function SeleccionarDisco() {
       {discos.length === 0 ? (
         <div className="no-discos">
           <p>No hay discos disponibles</p>
-          <p>Usa la terminal para crear discos con el comando mkdisk</p>
+          <p>Use la terminal para crear discos con el comando mkdisk</p>
           <button onClick={() => navigate('/terminal')}>Ir a la Terminal</button>
         </div>
       ) : (

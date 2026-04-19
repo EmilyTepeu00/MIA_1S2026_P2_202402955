@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 
 function ExploradorArchivos() {
+  // Estados para los textareas
   const [rutaActual, setRutaActual] = useState('/');
   const [contenido, setContenido] = useState([]);
   const [cargando, setCargando] = useState(true);
@@ -11,6 +12,8 @@ function ExploradorArchivos() {
   const particion = JSON.parse(localStorage.getItem('particionSeleccionada') || '{}');
 
   useEffect(() => {
+    console.log('Particion seleccionada:', particion);
+    console.log('ID:', particion.id);
     if (!particion.id) {
       navigate('/seleccionar-particion');
       return;
@@ -21,6 +24,8 @@ function ExploradorArchivos() {
   const cargarContenido = async (ruta) => {
     setCargando(true);
     setError('');
+    console.log('Cargando ruta:', ruta);
+    console.log('ID de particion:', particion.id);
     try {
       const response = await fetch('/api/listarDirectorio', {
         method: 'POST',
@@ -28,32 +33,39 @@ function ExploradorArchivos() {
         body: JSON.stringify({ id: particion.id, ruta: ruta })
       });
       const data = await response.json();
+      console.log('Respuesta del backend:', data);
       
       // Parsear el contenido del reporte LS
       const lineas = data.contenido.split('\n');
+      console.log('Lineas recibidas:', lineas);
+      
       const elementos = [];
       
       for (const linea of lineas) {
-        // Formato: "permisos | owner | grupo | tamaño | fecha | tipo | nombre"
+        if (linea.includes('Permisos') || linea.includes('---') || linea.trim() === '') {
+          continue;
+        }
+        
         if (linea.includes('|')) {
           const partes = linea.split('|');
-          if (partes.length >= 7) {
+          if (partes.length >= 6) {
             elementos.push({
               permisos: partes[0].trim(),
               owner: partes[1].trim(),
               grupo: partes[2].trim(),
               tamaño: partes[3].trim(),
-              fecha: partes[4].trim(),
-              tipo: partes[5].trim(),
-              nombre: partes[6].trim()
+              tipo: partes[4].trim(),
+              nombre: partes[5].trim()
             });
           }
         }
       }
       
+      console.log('Elementos parseados:', elementos);
       setContenido(elementos);
       setRutaActual(ruta);
     } catch (err) {
+      console.error('Error:', err);
       setError('Error al cargar el contenido');
     } finally {
       setCargando(false);

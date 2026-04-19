@@ -3719,8 +3719,9 @@ string obtenerDiscos() {
     vector<string> discos;
     while (getline(ss, linea)) {
         if (!linea.empty()) {
-            // Quitar salto de linea
-            linea.pop_back();
+            // Eliminar el salto de línea correctamente
+            if (linea.back() == '\n') linea.pop_back();
+            if (linea.back() == '\r') linea.pop_back();
             discos.push_back(linea);
         }
     }
@@ -3757,28 +3758,61 @@ string listarDirectorio(string id, string ruta) {
         return "ERROR: No se pudo leer superbloque";
     }
     
-    // 3. Obtener el reporte LS
-    string path_temp = "/tmp/ls_temp.txt";
-    string comando = "rep -name=ls -path=" + path_temp + " -path_file_ls=\"" + ruta + "\" -id=" + id;
-    procesar_comando(comando);
-    
-    // 4. Leer el archivo temporal
-    ifstream archivo(path_temp);
-    if (!archivo.is_open()) {
-        return "ERROR: No se pudo generar el listado";
+    // 3. Obtener el inodo de la ruta
+    int inodo_dir = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta);
+    if (inodo_dir == -1) {
+        return "ERROR: No existe la ruta: " + ruta;
     }
     
-    string contenido;
-    string linea;
-    while (getline(archivo, linea)) {
-        contenido += linea + "\n";
+    Inodo dir_inodo;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_dir, dir_inodo)) {
+        return "ERROR: No se pudo leer el inodo del directorio";
     }
-    archivo.close();
     
-    // Eliminar archivo temporal
-    remove(path_temp.c_str());
+    if (dir_inodo.i_type != 0) {
+        return "ERROR: La ruta no es un directorio";
+    }
     
-    return contenido;
+    // 4. Generar el listado
+    stringstream resultado;
+    resultado << "Permisos | Owner | Grupo | Tamano | Tipo | Nombre\n";
+    resultado << "------------------------------------------------\n";
+    
+    // Recorrer bloques del directorio
+    for (int i = 0; i < 12 && dir_inodo.i_block[i] != -1; i++) {
+        BloqueCarpeta bloque;
+        if (!leerBloqueCarpeta(m.path_disco, sb.s_block_start, dir_inodo.i_block[i], bloque)) {
+            continue;
+        }
+        
+        for (int j = 0; j < 4; j++) {
+            if (bloque.b_content[j].b_inodo != -1) {
+                string nombre(bloque.b_content[j].b_name);
+                if (nombre == "." || nombre == "..") continue;
+                
+                int inodo_hijo = bloque.b_content[j].b_inodo;
+                Inodo hijo;
+                if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_hijo, hijo)) {
+                    continue;
+                }
+                
+                // Permisos
+                resultado << hijo.i_perm[0] << hijo.i_perm[1] << hijo.i_perm[2] << " | ";
+                // Owner
+                resultado << hijo.i_uid << " | ";
+                // Grupo
+                resultado << hijo.i_gid << " | ";
+                // Tamano
+                resultado << hijo.i_size << " | ";
+                // Tipo
+                resultado << (hijo.i_type == 0 ? "DIR" : "FILE") << " | ";
+                // Nombre
+                resultado << nombre << "\n";
+            }
+        }
+    }
+    
+    return resultado.str();
 }
 
 // MAIN CON CORS 

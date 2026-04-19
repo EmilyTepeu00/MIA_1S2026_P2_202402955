@@ -10,6 +10,12 @@ function SeleccionarParticion() {
   const discoSeleccionado = localStorage.getItem('discoSeleccionado');
 
   useEffect(() => {
+    const sesion = localStorage.getItem('sesion_activa');
+    console.log('SeleccionarParticion - Sesion activa:', sesion);
+    if (sesion !== 'true') {
+      navigate('/login');
+      return;
+    }
     if (!discoSeleccionado) {
       navigate('/seleccionar-disco');
       return;
@@ -25,9 +31,12 @@ function SeleccionarParticion() {
         body: JSON.stringify({ comando: 'mounted' })
       });
       const data = await response.json();
+      console.log('Respuesta de mounted:', data);
       
       // Parsear la salida de mounted
       const lineas = data.resultado.split('\n');
+      console.log('Lineas:', lineas);
+      
       const montadas = [];
       let particionActual = {};
       
@@ -38,21 +47,36 @@ function SeleccionarParticion() {
           }
           particionActual = { id: linea.substring(4).trim() };
         } else if (linea.includes('Disco:')) {
-          particionActual.ruta = linea.substring(linea.indexOf(':') + 1).trim();
+          const partes = linea.split(':');
+          if (partes.length >= 2) {
+            particionActual.ruta = partes[1].trim();
+          }
         } else if (linea.includes('Particion:')) {
-          particionActual.nombre = linea.substring(linea.indexOf(':') + 1).trim();
+          const partes = linea.split(':');
+          if (partes.length >= 2) {
+            particionActual.nombre = partes[1].trim();
+          }
         } else if (linea.includes('Tipo:')) {
-          particionActual.tipo = linea.substring(linea.indexOf(':') + 1).trim();
+          const partes = linea.split(':');
+          if (partes.length >= 2) {
+            particionActual.tipo = partes[1].trim();
+          }
         }
       }
       if (particionActual.id) {
         montadas.push(particionActual);
       }
       
+      console.log('Particiones montadas:', montadas);
+      console.log('Disco seleccionado:', discoSeleccionado);
+      
       // Filtrar particiones del disco seleccionado
-      const filtradas = montadas.filter(p => p.ruta === discoSeleccionado);
+      const filtradas = montadas.filter(part => part.ruta === discoSeleccionado);
+      console.log('Particiones filtradas:', filtradas);
+      
       setParticiones(filtradas);
     } catch (err) {
+      console.error('Error:', err);
       setError('Error al cargar particiones');
     } finally {
       setCargando(false);
@@ -85,6 +109,7 @@ function SeleccionarParticion() {
         <div className="no-particiones">
           <p>No hay particiones montadas en este disco</p>
           <p>Usa la terminal para montar particiones con el comando mount</p>
+          <p>Comando: mount -path=../discos/Disco1.mia -name=Particion1</p>
           <button onClick={() => navigate('/terminal')}>Ir a la Terminal</button>
         </div>
       ) : (
@@ -94,6 +119,7 @@ function SeleccionarParticion() {
               <h3>{particion.nombre}</h3>
               <p>ID: {particion.id}</p>
               <p>Tipo: {particion.tipo}</p>
+              <p>Ruta: {particion.ruta}</p>
             </div>
           ))}
         </div>

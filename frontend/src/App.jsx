@@ -13,6 +13,7 @@ import Journal from './pages/Journal';
 function App() {
   // Verificar si hay sesion activa
   const isAuthenticated = localStorage.getItem('sesion_activa') === 'true';
+  console.log('App - isAuthenticated:', isAuthenticated);
 
   return (
     <Routes>
@@ -25,7 +26,10 @@ function App() {
       
       {/* Rutas protegidas (requieren sesion) */}
       <Route path="/seleccionar-disco" element={
-        isAuthenticated ? <SeleccionarDisco /> : <Navigate to="/login" />
+        (() => {
+          console.log('Renderizando ruta /seleccionar-disco, isAuthenticated:', isAuthenticated);
+          return isAuthenticated ? <SeleccionarDisco /> : <Navigate to="/login" />;
+        })()
       } />
       <Route path="/seleccionar-particion" element={
         isAuthenticated ? <SeleccionarParticion /> : <Navigate to="/login" />

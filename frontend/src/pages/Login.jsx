@@ -29,8 +29,9 @@ function Login() {
         localStorage.setItem('sesion_activa', 'true');
         localStorage.setItem('usuario', user);
         localStorage.setItem('id_particion', id);
-        console.log('Sesion guardada, redirigiendo a la terminal');
-        navigate('/');
+        console.log('Sesion guardada');
+        // Para forzar la recarga completa de la app
+        window.location.href = '/';
       } else {
         setError(data.resultado || 'Error desconocido');
       }
@@ -88,7 +89,7 @@ function Login() {
         
         <div className="login-footer">
           <button onClick={irATerminal} className="terminal-btn">
-            Ir a la Terminal
+            Ir a la Terminal (crear discos primero)
           </button>
         </div>
       </div>
