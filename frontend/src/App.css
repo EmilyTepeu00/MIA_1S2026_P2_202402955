@@ -515,3 +515,25 @@ textarea::-webkit-scrollbar-thumb:hover {
   border-radius: 16px;
   box-shadow: 0 2px 10px rgba(0, 0, 0, 0.05);
 }
+
+.login-footer {
+  margin-top: 1.5rem;
+  text-align: center;
+}
+
+.terminal-btn {
+  background: #6b7280 !important;
+  width: 100%;
+}
+
+.terminal-btn:hover {
+  background: #4b5563 !important;
+}
+
+.login-btn {
+  background: #22c55e !important;
+}
+
+.login-btn:hover {
+  background: #16a34a !important;
+}

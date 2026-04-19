@@ -1,4 +1,3 @@
-// src/pages/Login.jsx
 import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 
@@ -30,8 +29,8 @@ function Login() {
         localStorage.setItem('sesion_activa', 'true');
         localStorage.setItem('usuario', user);
         localStorage.setItem('id_particion', id);
-        console.log('Sesion guardada, redirigiendo a /terminal');
-        navigate('/terminal');
+        console.log('Sesion guardada, redirigiendo a la terminal');
+        navigate('/');
       } else {
         setError(data.resultado || 'Error desconocido');
       }
@@ -41,6 +40,11 @@ function Login() {
     } finally {
       setCargando(false);
     }
+  };
+
+  // Funcion para ir a la terminal sin login (para crear discos primero)
+  const irATerminal = () => {
+    navigate('/');
   };
 
   return (
@@ -58,7 +62,7 @@ function Login() {
             />
           </div>
           <div className="form-group">
-            <label>Contraseña</label>
+            <label>Contrasena</label>
             <input 
               type="password" 
               value={pass} 
@@ -81,6 +85,12 @@ function Login() {
             {cargando ? 'Verificando...' : 'Ingresar'}
           </button>
         </form>
+        
+        <div className="login-footer">
+          <button onClick={irATerminal} className="terminal-btn">
+            Ir a la Terminal
+          </button>
+        </div>
       </div>
     </div>
   );

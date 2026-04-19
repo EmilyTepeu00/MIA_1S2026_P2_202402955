@@ -43,7 +43,7 @@ function Terminal() {
     }
   };
 
-  // PARA CARGAR ARCHIVO .smia
+  // Funcion para cargar archivo .smia
   const cargarScript = (event) => {
     const file = event.target.files[0];
     if (file) {
@@ -55,7 +55,8 @@ function Terminal() {
     }
   };
 
-  // NAVEGACION
+  // FUNCIONES DE NAVEGACION
+  const irALogin = () => navigate('/login');
   const irAExplorador = () => navigate('/seleccionar-disco');
   const irAJournal = () => navigate('/journal');
   
@@ -68,17 +69,28 @@ function Terminal() {
     localStorage.removeItem('sesion_activa');
     localStorage.removeItem('usuario');
     localStorage.removeItem('id_particion');
-    navigate('/login');
+    // Actualizar UI
+    window.location.reload();
   };
+
+  // Verificar si hay sesion activa
+  const isAuthenticated = localStorage.getItem('sesion_activa') === 'true';
 
   return (
     <div className="app">
       <h1>Proyecto 2: [C++Disk 2.0]</h1>
       
+      {/* BOTONES DE NAVEGACION */}
       <div className="nav-buttons">
-        <button onClick={irAExplorador}>Explorador</button>
-        <button onClick={irAJournal}>Journaling</button>
-        <button onClick={cerrarSesion} className="logout-btn">Cerrar Sesion</button>
+        {!isAuthenticated ? (
+          <button onClick={irALogin} className="login-btn">Iniciar Sesion</button>
+        ) : (
+          <>
+            <button onClick={irAExplorador}>Explorador</button>
+            <button onClick={irAJournal}>Journaling</button>
+            <button onClick={cerrarSesion} className="logout-btn">Cerrar Sesion</button>
+          </>
+        )}
       </div>
       
       <div className="container">
