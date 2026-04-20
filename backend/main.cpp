@@ -4081,7 +4081,7 @@ int main() {
     });
 
     // Ruta para obtener entradas del journal
-    CROW_ROUTE(app, "/api/obtenerJournal").methods("POST"_method)([](const crow::request& req){
+    CROW_ROUTE(app, "/obtenerJournal").methods("POST"_method)([](const crow::request& req){
         auto body = crow::json::load(req.body);
         if (!body) {
             return crow::response(400, "JSON invalido");

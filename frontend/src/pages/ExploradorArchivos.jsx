@@ -92,12 +92,12 @@ function ExploradorArchivos() {
   if (cargando) {
     return <div className="loading">Cargando...</div>;
   }
-
+  
   return (
     <div className="explorador-archivos-container">
       <div className="explorador-archivos-header">
         <h1>Explorador de Archivos</h1>
-        <button onClick={volverAParticiones}>Volver a Particiones</button>
+          <button onClick={() => navigate('/seleccionar-particion')} className="regresar-btn">Regresar</button>
       </div>
       
       <div className="ruta-actual">

@@ -100,7 +100,7 @@ function SeleccionarParticion() {
     <div className="seleccionar-particion-container">
       <div className="seleccionar-particion-header">
         <h1>Seleccionar Particion</h1>
-        <button onClick={volverADiscos}>Volver a Discos</button>
+          <button onClick={() => navigate('/seleccionar-disco')} className="regresar-btn">Regresar</button>
       </div>
       
       {error && <div className="error-message">{error}</div>}

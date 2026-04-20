@@ -593,3 +593,20 @@ textarea::-webkit-scrollbar-thumb:hover {
   border-radius: 16px;
   color: #6b7280;
 }
+
+.regresar-btn {
+  background: #6b9ac4 !important;
+  color: white !important;
+}
+
+.regresar-btn:hover {
+  background: #1a2b4c !important;
+}
+
+.logout-btn {
+  background: #dc2626 !important;
+}
+
+.logout-btn:hover {
+  background: #b91c1c !important;
+}

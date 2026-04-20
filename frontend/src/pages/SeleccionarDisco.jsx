@@ -54,7 +54,7 @@ function SeleccionarDisco() {
     <div className="seleccionar-disco-container">
       <div className="seleccionar-disco-header">
         <h1>Seleccionar Disco</h1>
-        <button onClick={volverALogin} className="logout-btn">Cerrar Sesion</button>
+        <button onClick={() => navigate('/')} className="regresar-btn">Regresar</button>
       </div>
       
       {error && <div className="error-message">{error}</div>}
