@@ -2785,6 +2785,128 @@ string cat(vector<string> archivos) {
     return resultado;
 }
 
+// --- FUNCION: remove (eliminar archivo o carpeta) ---
+string removeItem(string path) {
+    // Verificar sesion activa
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    // Buscar particion montada
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Buscar inodo del archivo/carpeta
+    int inodo_eliminar = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path);
+    if (inodo_eliminar == -1) {
+        return "ERROR: No existe la ruta: " + path;
+    }
+    
+    // Obtener padre y nombre
+    auto [ruta_padre, nombre] = obtenerPadreYNombre(path);
+    int inodo_padre = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre);
+    
+    if (inodo_padre == -1) {
+        return "ERROR: No existe la carpeta padre";
+    }
+    
+    // Verificar permisos de escritura en el archivo/carpeta
+    Inodo inodo;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_eliminar, inodo)) {
+        return "ERROR: No se pudo leer el inodo";
+    }
+    
+    // Root tiene todos los permisos
+    bool tiene_permiso = (sesion_actual.usuario == "root");
+    
+    if (!tiene_permiso) {
+        // Verificar si es propietario
+        if (inodo.i_uid == sesion_actual.uid) {
+            // Permiso de escritura para owner (bit 1 de 664 = 6 = rw-)
+            tiene_permiso = (inodo.i_perm[0] == '6' || inodo.i_perm[0] == '7');
+        }
+    }
+    
+    if (!tiene_permiso) {
+        return "ERROR: No tiene permisos de escritura para eliminar: " + path;
+    }
+    
+    // ELiminar archivos y carpetas vacias
+    
+    if (inodo.i_type == 0) {
+        // Si es carpeta verificar si tiene contenido
+        bool tiene_contenido = false;
+        for (int i = 0; i < 12 && inodo.i_block[i] != -1; i++) {
+            BloqueCarpeta bloque;
+            if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo.i_block[i], bloque)) {
+                for (int j = 0; j < 4; j++) {
+                    if (bloque.b_content[j].b_inodo != -1) {
+                        string nombre_hijo(bloque.b_content[j].b_name);
+                        if (nombre_hijo != "." && nombre_hijo != "..") {
+                            tiene_contenido = true;
+                            break;
+                        }
+                    }
+                }
+            }
+            if (tiene_contenido) break;
+        }
+        
+        if (tiene_contenido) {
+            return "ERROR: La carpeta no esta vacia. Elimine su contenido primero";
+        }
+    }
+    
+    // Liberar los bloques del inodo
+    for (int i = 0; i < 15 && inodo.i_block[i] != -1; i++) {
+        liberarBitBloque(m.path_disco, sb.s_bm_block_start, sb.s_blocks_count, inodo.i_block[i]);
+        inodo.i_block[i] = -1;
+    }
+    
+    // Liberar el inodo
+    liberarBitInodo(m.path_disco, sb.s_bm_inode_start, sb.s_inodes_count, inodo_eliminar);
+    
+    // Eliminar la entrada de la carpeta padre
+    Inodo inodo_padre_obj;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_padre, inodo_padre_obj)) {
+        return "ERROR: No se pudo leer inodo padre";
+    }
+    
+    for (int i = 0; i < 12 && inodo_padre_obj.i_block[i] != -1; i++) {
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo == inodo_eliminar) {
+                    bloque.b_content[j].b_inodo = -1;
+                    memset(bloque.b_content[j].b_name, 0, 12);
+                    escribirBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque);
+                    break;
+                }
+            }
+        }
+    }
+    
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "REMOVE", path, "");
+    
+    return "REMOVE: '" + path + "' eliminado exitosamente";
+}
+
 
 // ******** FUNCIONES DE REPORTES ********
 
@@ -3881,6 +4003,28 @@ string procesar_comando(const string& comando) {
         }
         
         return cat(archivos);
+    }
+
+    // REMOVE: Eliminar archivo o carpeta
+    else if (comando.find("remove") == 0) {
+        string path = "";
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (path.empty()) {
+            return "ERROR: Falta parametro -path para REMOVE";
+        }
+        
+        return removeItem(path);
     }
 
     // REP: Genaracion de reportes
