@@ -1136,7 +1136,7 @@ string rmdisk(string path) {
 }
 
 // --- FUNCION: fdisk (crear particion) ---
-string fdisk(int size, string unit, string path, string type, string fit, string name) {
+string fdisk(int size, string unit, string path, string type, string fit, string name, string delete_type, int add_size) {
 
     // 1. Validar tamaño
     if (size <= 0) return "ERROR: Tamaño invalido";
@@ -1151,6 +1151,123 @@ string fdisk(int size, string unit, string path, string type, string fit, string
     MBR mbr;
     if (!leerMBR(path, mbr)) {
         return "ERROR: No se pudo leer el disco en " + path;
+    }
+
+    // ELIMINAR PARTICION
+    if (!delete_type.empty()) {
+        // Buscar particion por nombre
+        int idx = -1;
+        for (int i = 0; i < 4; i++) {
+            if (mbr.mbr_partitions[i].part_size > 0) {
+                string nombre_existente(mbr.mbr_partitions[i].part_name);
+                if (nombre_existente == name) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        
+        if (idx == -1) {
+            return "ERROR: No existe particion con nombre '" + name + "'";
+        }
+        
+        // Si es extendida, hay que eliminar logicas tambien
+        if (mbr.mbr_partitions[idx].part_type == 'E') {
+            // Limpiar el area de la extendida con \0
+            ofstream disco(path, ios::binary | ios::in | ios::out);
+            if (disco.is_open()) {
+                char* ceros = new char[mbr.mbr_partitions[idx].part_size]();
+                disco.seekp(mbr.mbr_partitions[idx].part_start);
+                disco.write(ceros, mbr.mbr_partitions[idx].part_size);
+                delete[] ceros;
+                disco.close();
+            }
+        }
+        
+        if (delete_type == "full") {
+            // Limpiar el espacio de la particion con \0
+            ofstream disco(path, ios::binary | ios::in | ios::out);
+            if (disco.is_open()) {
+                char* ceros = new char[mbr.mbr_partitions[idx].part_size]();
+                disco.seekp(mbr.mbr_partitions[idx].part_start);
+                disco.write(ceros, mbr.mbr_partitions[idx].part_size);
+                delete[] ceros;
+                disco.close();
+            }
+        }
+        
+        // Marcar particion como vacia
+        mbr.mbr_partitions[idx].part_size = 0;
+        mbr.mbr_partitions[idx].part_start = 0;
+        memset(mbr.mbr_partitions[idx].part_name, 0, 16);
+        
+        if (!escribirMBR(path, mbr)) {
+            return "ERROR: No se pudo actualizar el MBR";
+        }
+        
+        return "FDISK: Particion '" + name + "' eliminada (" + delete_type + ")";
+    }
+    
+    // AGREGAR/QUITAR ESPACIO
+    if (add_size != 0) {
+        // Buscar particion por nombre
+        int idx = -1;
+        for (int i = 0; i < 4; i++) {
+            if (mbr.mbr_partitions[i].part_size > 0) {
+                string nombre_existente(mbr.mbr_partitions[i].part_name);
+                if (nombre_existente == name) {
+                    idx = i;
+                    break;
+                }
+            }
+        }
+        
+        if (idx == -1) {
+            return "ERROR: No existe particion con nombre '" + name + "'";
+        }
+        
+        int nuevo_tamano = mbr.mbr_partitions[idx].part_size + add_size;
+        
+        if (nuevo_tamano <= 0) {
+            return "ERROR: La particion quedaria con tamaño negativo o cero";
+        }
+        
+        // Validar que no se salga del disco
+        int fin_particion = mbr.mbr_partitions[idx].part_start + nuevo_tamano;
+        if (fin_particion > mbr.mbr_size) {
+            return "ERROR: La particion excede el tamaño del disco";
+        }
+        
+        // Validar que no invada otra particion
+        for (int i = 0; i < 4; i++) {
+            if (i != idx && mbr.mbr_partitions[i].part_size > 0) {
+                int inicio_otra = mbr.mbr_partitions[i].part_start;
+                int fin_otra = inicio_otra + mbr.mbr_partitions[i].part_size;
+                
+                if (add_size > 0) {
+                    // Expandiendo: verificar que no choque con la siguiente
+                    if (fin_particion > inicio_otra) {
+                        return "ERROR: No hay espacio libre despues de la particion";
+                    }
+                } else {
+                    // Reduciendo: verificar que no se superponga
+                    if (mbr.mbr_partitions[idx].part_start < fin_otra && 
+                        fin_particion > inicio_otra) {
+                        return "ERROR: No se puede reducir porque invadiria otra particion";
+                    }
+                }
+            }
+        }
+        
+        // Actualizar tamaño
+        mbr.mbr_partitions[idx].part_size = nuevo_tamano;
+        
+        if (!escribirMBR(path, mbr)) {
+            return "ERROR: No se pudo actualizar el MBR";
+        }
+        
+        string operacion = (add_size > 0) ? "agregados" : "quitados";
+        return "FDISK: " + to_string(abs(add_size)) + " bytes " + operacion + " a particion '" + name + "'. Nuevo tamaño: " + to_string(nuevo_tamano) + " bytes";
     }
 
     // 4. Validar que no haya una particion con el mismo nombre
@@ -3309,15 +3426,16 @@ string procesar_comando(const string& comando) {
         return rmdisk(path);
     }
 
-
-    // FDISK: Crear particion
+    // FDISK: Crear/eliminar/redimensionar particion
     else if (comando.find("fdisk") == 0) {
         int size = 0;
-        string unit = "K";        // KB por default
+        string unit = "K";
         string path = "";
-        string type = "P";        // Primari por default
-        string fit = "WF";        // Worst fit por default
+        string type = "P";
+        string fit = "WF";
         string name = "";
+        string delete_type = "";
+        int add_size = 0;
         
         // EXTRAER PARAMETRO: -size
         size_t pos = comando.find("-size=");
@@ -3368,14 +3486,32 @@ string procesar_comando(const string& comando) {
             }
         }
         
-        // VALIDAR  PARAMETROS OBLIGATORIOS
-        if (size <= 0) return "ERROR: -size requerido";
+        // EXTRAER PARAMETRO: -delete (NUEVO)
+        pos = comando.find("-delete=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 8);
+            delete_type = valor.substr(0, valor.find(' '));
+        }
+        
+        // EXTRAER PARAMETRO: -add
+        pos = comando.find("-add=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 5);
+            add_size = stoi(valor.substr(0, valor.find(' ')));
+        }
+        
+        // Validar parametros
         if (path.empty()) return "ERROR: -path requerido";
         if (name.empty()) return "ERROR: -name requerido";
         
-        return fdisk(size, unit, path, type, fit, name);
+        // Si no es delete ni add, validar size
+        if (delete_type.empty() && add_size == 0 && size <= 0) {
+            return "ERROR: -size requerido para crear particion";
+        }
+        
+        return fdisk(size, unit, path, type, fit, name, delete_type, add_size);
     }
-
+    
     // MOUNTED: Muestra las particiones montadas en memoria
         else if (comando.find("mounted") == 0) {
         return mounted();
