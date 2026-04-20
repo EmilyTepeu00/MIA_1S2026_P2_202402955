@@ -1135,25 +1135,16 @@ string rmdisk(string path) {
     return "RMDISK: Disco eliminado exitosamente\nRuta: " + path;
 }
 
-// --- FUNCION: fdisk (crear particion) ---
+// --- FUNCION: fdisk (crear/eliminar/redimensionar particion) ---
 string fdisk(int size, string unit, string path, string type, string fit, string name, string delete_type, int add_size) {
 
-    // 1. Validar tamaño
-    if (size <= 0) return "ERROR: Tamaño invalido";
-
-    // 2. Convertir a bytes
-    int tamano_bytes = size;
-    if (unit == "K") tamano_bytes = size * 1024;
-    else if (unit == "M") tamano_bytes = size * 1024 * 1024;
-    else tamano_bytes = size * 1024; // KB por default
-
-    // 3. Leer MBR del disco
+    // 1. Leer MBR del disco
     MBR mbr;
     if (!leerMBR(path, mbr)) {
         return "ERROR: No se pudo leer el disco en " + path;
     }
 
-    // ELIMINAR PARTICION
+    // ELIMINAR PARTICION (si viene -delete
     if (!delete_type.empty()) {
         // Buscar particion por nombre
         int idx = -1;
@@ -1171,9 +1162,8 @@ string fdisk(int size, string unit, string path, string type, string fit, string
             return "ERROR: No existe particion con nombre '" + name + "'";
         }
         
-        // Si es extendida, hay que eliminar logicas tambien
+        // Si es extendida, limpiar todo su espacio
         if (mbr.mbr_partitions[idx].part_type == 'E') {
-            // Limpiar el area de la extendida con \0
             ofstream disco(path, ios::binary | ios::in | ios::out);
             if (disco.is_open()) {
                 char* ceros = new char[mbr.mbr_partitions[idx].part_size]();
@@ -1185,7 +1175,6 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         }
         
         if (delete_type == "full") {
-            // Limpiar el espacio de la particion con \0
             ofstream disco(path, ios::binary | ios::in | ios::out);
             if (disco.is_open()) {
                 char* ceros = new char[mbr.mbr_partitions[idx].part_size]();
@@ -1200,6 +1189,8 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         mbr.mbr_partitions[idx].part_size = 0;
         mbr.mbr_partitions[idx].part_start = 0;
         memset(mbr.mbr_partitions[idx].part_name, 0, 16);
+        mbr.mbr_partitions[idx].part_status = '0';
+        mbr.mbr_partitions[idx].part_correlative = -1;
         
         if (!escribirMBR(path, mbr)) {
             return "ERROR: No se pudo actualizar el MBR";
@@ -1208,7 +1199,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         return "FDISK: Particion '" + name + "' eliminada (" + delete_type + ")";
     }
     
-    // AGREGAR/QUITAR ESPACIO
+    // AGREGAR O QUITAR ESPACIO (si viene -add)
     if (add_size != 0) {
         // Buscar particion por nombre
         int idx = -1;
@@ -1245,12 +1236,10 @@ string fdisk(int size, string unit, string path, string type, string fit, string
                 int fin_otra = inicio_otra + mbr.mbr_partitions[i].part_size;
                 
                 if (add_size > 0) {
-                    // Expandiendo: verificar que no choque con la siguiente
                     if (fin_particion > inicio_otra) {
                         return "ERROR: No hay espacio libre despues de la particion";
                     }
                 } else {
-                    // Reduciendo: verificar que no se superponga
                     if (mbr.mbr_partitions[idx].part_start < fin_otra && 
                         fin_particion > inicio_otra) {
                         return "ERROR: No se puede reducir porque invadiria otra particion";
@@ -1269,6 +1258,17 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         string operacion = (add_size > 0) ? "agregados" : "quitados";
         return "FDISK: " + to_string(abs(add_size)) + " bytes " + operacion + " a particion '" + name + "'. Nuevo tamaño: " + to_string(nuevo_tamano) + " bytes";
     }
+
+    // CREAR PARTICION NUEVA
+    
+    // 2. Validar tamaño (solo para crear)
+    if (size <= 0) return "ERROR: Tamaño invalido";
+
+    // 3. Convertir a bytes
+    int tamano_bytes = size;
+    if (unit == "K") tamano_bytes = size * 1024;
+    else if (unit == "M") tamano_bytes = size * 1024 * 1024;
+    else tamano_bytes = size * 1024;
 
     // 4. Validar que no haya una particion con el mismo nombre
     for (int i = 0; i < 4; i++) {
@@ -1293,7 +1293,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
     // 6. Validar limites
     if (count >= 4 && type != "L") return "ERROR: El maximo de particiones es de 4";
 
-    // 7. SI es extendida -> validar que no haya otra
+    // 7. Si es extendida -> validar que no haya otra
     if (type == "E" && extendida_idx != -1) {
         return "ERROR: Ya existe una particion extendida";
     }
@@ -1305,50 +1305,41 @@ string fdisk(int size, string unit, string path, string type, string fit, string
 
     // EN CASO DE PARTICION LOGICA
     if (type == "L") {
-        // Obtener inicio y tamaño de la extendida
         int ext_start = mbr.mbr_partitions[extendida_idx].part_start;
         int ext_size = mbr.mbr_partitions[extendida_idx].part_size;
 
-        // Recorrer las EBR existentes dentro de la extendida
         int ebr_pos = ext_start;
         EBR ebr_actual;
         int last_ebr_pos = -1;
         int last_ebr_end = ext_start;
 
         while (ebr_pos != -1 && ebr_pos < ext_start + ext_size) {
-            if (!leerEBR(path, ebr_pos, ebr_actual)) {
-                break;
-            }
-
+            if (!leerEBR(path, ebr_pos, ebr_actual)) break;
             last_ebr_pos = ebr_pos;
             last_ebr_end = ebr_actual.part_start + ebr_actual.part_size;
             ebr_pos = ebr_actual.part_next;
         }
 
-        // Calcular espacio disponible (incluyendo el EBR)
         int espacio_disponible = (ext_start + ext_size) - last_ebr_end;
-        int espacio_necesario = tamano_bytes + sizeof(EBR);  // Datos + EBR
+        int espacio_necesario = tamano_bytes + sizeof(EBR);
 
         if (espacio_disponible < espacio_necesario) {
             return "ERROR: No hay espacio suficiente en la particion extendida";
         }
 
-        // Crear nuevo EBR
         int nuevo_ebr_pos = last_ebr_end;
         EBR nuevo_ebr;
         nuevo_ebr.part_mount = '0';
         nuevo_ebr.part_fit = fit[0];
-        nuevo_ebr.part_start = nuevo_ebr_pos + sizeof(EBR);  // Datos despues del EBR
+        nuevo_ebr.part_start = nuevo_ebr_pos + sizeof(EBR);
         nuevo_ebr.part_size = tamano_bytes;
         nuevo_ebr.part_next = -1;
         strcpy(nuevo_ebr.part_name, name.c_str());
 
-        // Escribir nuevo EBR
         if (!escribirEBR(path, nuevo_ebr_pos, nuevo_ebr)) {
             return "ERROR: No se pudo escribir el EBR";
         }
 
-        // Actualizar EBR anterior si es que hay
         if (last_ebr_pos != -1) {
             ebr_actual.part_next = nuevo_ebr_pos;
             if (!escribirEBR(path, last_ebr_pos, ebr_actual)) {
@@ -1356,8 +1347,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
             }
         }
 
-        // Mensaje de exito
-    stringstream res;
+        stringstream res;
         res << "FDISK: Particion logica creada exitosamente\n";
         res << "Disco: " << path << "\n";
         res << "Nombre: " << name << "\n";
@@ -1366,7 +1356,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         res << "EBR en: " << nuevo_ebr_pos << "\n";
         res << "Datos inician en: " << nuevo_ebr.part_start;
         return res.str();
-        }
+    }
 
     // EN CASO DE PARTICION PRIMARIA O EXTENDIDA
 
@@ -1383,7 +1373,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
     // 11. Crear nueva particion
     Partition nueva;
     nueva.part_status = '0';
-    nueva.part_type = type[0];  // 'P', 'E', 'L'
+    nueva.part_type = type[0];
     nueva.part_fit = fit_char;
     nueva.part_start = espacios[idx_espacio].first;
     nueva.part_size = tamano_bytes;
@@ -1405,7 +1395,7 @@ string fdisk(int size, string unit, string path, string type, string fit, string
         ebr_inicial.part_mount = '0';
         ebr_inicial.part_fit = fit[0];
         ebr_inicial.part_start = nueva.part_start + sizeof(EBR);
-        ebr_inicial.part_size = 0;  // 0 -> vacio
+        ebr_inicial.part_size = 0;
         ebr_inicial.part_next = -1;
         strcpy(ebr_inicial.part_name, "EBR_Inicial");
 
