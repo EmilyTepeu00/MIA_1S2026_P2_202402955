@@ -1471,6 +1471,53 @@ string mount(string path, string name) {
     return "MOUNT: Particion montada exitosamente\nID: " + id_generado;
 }
 
+// --- COMANDO: unmount (desmontar particion) ---
+string unmount(string id) {
+    // Buscar la particion por ID
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) {
+        return "ERROR: No existe particion montada con ID: " + id;
+    }
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Leer el MBR del disco
+    MBR mbr;
+    if (!leerMBR(m.path_disco, mbr)) {
+        return "ERROR: No se pudo leer el disco";
+    }
+    
+    // Buscar la particion por nombre y actualizar su estado
+    for (int i = 0; i < 4; i++) {
+        if (mbr.mbr_partitions[i].part_size > 0) {
+            string nombre_existente(mbr.mbr_partitions[i].part_name);
+            if (nombre_existente == m.nombre_particion) {
+                mbr.mbr_partitions[i].part_status = '0';
+                mbr.mbr_partitions[i].part_correlative = -1;
+                memset(mbr.mbr_partitions[i].part_id, 0, 4);
+                break;
+            }
+        }
+    }
+    
+    // Guardar MBR actualizado
+    if (!escribirMBR(m.path_disco, mbr)) {
+        return "ERROR: No se pudo actualizar el MBR";
+    }
+    
+    // Eliminar de la lista de montadas
+    particiones_montadas.erase(particiones_montadas.begin() + idx);
+    
+    return "UNMOUNT: Particion " + id + " desmontada exitosamente";
+}
+
 // --- COMANDO: mounted (particiones montadas en memoria) ---
 string mounted() {
     // Verificar si hay particiones montadas
@@ -3540,6 +3587,23 @@ string procesar_comando(const string& comando) {
         }
         
         return mount(path, name);
+    }
+
+    // UNMOUNT: Desmontar particion
+    else if (comando.find("unmount") == 0) {
+        string id = "";
+        
+        size_t pos = comando.find("-id=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 4);
+            id = valor.substr(0, valor.find(' '));
+        }
+        
+        if (id.empty()) {
+            return "ERROR: Falta parametro -id para UNMOUNT";
+        }
+        
+        return unmount(id);
     }
 
     // MKFS: Formateo de la particion
