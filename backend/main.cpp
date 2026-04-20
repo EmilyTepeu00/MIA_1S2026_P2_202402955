@@ -788,6 +788,77 @@ string mkdirInterno(string path_disco, Superblock &sb, string path, int uid, int
     return "OK";
 }
 
+// --- FUNCION: mkfileInterno (crea archivo con contenido) ---
+string mkfileInterno(string path_disco, Superblock &sb, string path, string contenido, int uid, int gid) {
+    auto [ruta_padre, nombre_archivo] = obtenerPadreYNombre(path);
+    
+    int inodo_padre = buscarInodoPorRuta(path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre);
+    if (inodo_padre == -1) return "ERROR: Carpeta padre no existe";
+    
+    int nuevo_inodo_pos = obtenerInodoLibre(path_disco, sb.s_bm_inode_start, sb.s_inodes_count);
+    if (nuevo_inodo_pos == -1) return "ERROR: No hay inodos libres";
+    
+    Inodo nuevo_inodo;
+    nuevo_inodo.i_uid = uid;
+    nuevo_inodo.i_gid = gid;
+    nuevo_inodo.i_size = contenido.length();
+    nuevo_inodo.i_type = 1;
+    nuevo_inodo.i_perm[0] = '6';
+    nuevo_inodo.i_perm[1] = '6';
+    nuevo_inodo.i_perm[2] = '4';
+    
+    // Asignar bloques para el contenido
+    int pos = 0;
+    int bloque_idx = 0;
+    int tam = contenido.length();
+    
+    while (tam > 0 && bloque_idx < 12) {
+        int bloque_libre = obtenerBloqueLibre(path_disco, sb.s_bm_block_start, sb.s_blocks_count);
+        if (bloque_libre == -1) return "ERROR: No hay bloques libres";
+        
+        nuevo_inodo.i_block[bloque_idx] = bloque_libre;
+        marcarBitBloque(path_disco, sb.s_bm_block_start, sb.s_blocks_count, bloque_libre);
+        
+        BloqueArchivo bloque;
+        memset(bloque.b_content, 0, 64);
+        int copiar = min(64, tam);
+        strncpy(bloque.b_content, contenido.substr(pos, copiar).c_str(), copiar);
+        
+        if (!escribirBloqueArchivo(path_disco, sb.s_block_start, bloque_libre, bloque)) {
+            return "ERROR: No se pudo escribir bloque";
+        }
+        
+        tam -= copiar;
+        pos += copiar;
+        bloque_idx++;
+    }
+    
+    marcarBitInodo(path_disco, sb.s_bm_inode_start, sb.s_inodes_count, nuevo_inodo_pos);
+    if (!escribirInodo(path_disco, sb.s_inode_start, nuevo_inodo_pos, nuevo_inodo)) {
+        return "ERROR: No se pudo escribir inodo";
+    }
+    
+    // Agregar entrada en carpeta padre
+    Inodo inodo_padre_obj;
+    leerInodo(path_disco, sb.s_inode_start, inodo_padre, inodo_padre_obj);
+    
+    for (int i = 0; i < 12 && inodo_padre_obj.i_block[i] != -1; i++) {
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo == -1) {
+                    strcpy(bloque.b_content[j].b_name, nombre_archivo.c_str());
+                    bloque.b_content[j].b_inodo = nuevo_inodo_pos;
+                    escribirBloqueCarpeta(path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque);
+                    return "OK";
+                }
+            }
+        }
+    }
+    
+    return "ERROR: No hay espacio en carpeta padre";
+}
+
 // --- FUNCION: crearCarpetasPadre ---
 bool crearCarpetasPadre(string path_disco, Superblock &sb, string ruta, int uid, int gid) {
     if (ruta == "/") return true;
@@ -2907,6 +2978,121 @@ string removeItem(string path) {
     return "REMOVE: '" + path + "' eliminado exitosamente";
 }
 
+<<<<<<< HEAD
+=======
+// --- FUNCION: copy (copiar archivo o carpeta) ---
+string copyItem(string path_origen, string path_destino) {
+    // Verificar sesion activa
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    // Buscar particion montada
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Verificar que existe el origen
+    int inodo_origen = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path_origen);
+    if (inodo_origen == -1) {
+        return "ERROR: No existe la ruta de origen: " + path_origen;
+    }
+    
+    // Leer inodo del origen
+    Inodo inodo_orig;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_origen, inodo_orig)) {
+        return "ERROR: No se pudo leer el inodo de origen";
+    }
+    
+    // Verificar permisos de lectura en origen
+    bool puede_leer = (sesion_actual.usuario == "root");
+    if (!puede_leer && inodo_orig.i_uid == sesion_actual.uid) {
+        // Permiso de lectura para owner (primer digito 4,5,6,7 tiene lectura)
+        puede_leer = (inodo_orig.i_perm[0] == '4' || inodo_orig.i_perm[0] == '5' || inodo_orig.i_perm[0] == '6' || inodo_orig.i_perm[0] == '7');
+    }
+    
+    if (!puede_leer) {
+        return "ERROR: No tiene permisos de lectura para copiar: " + path_origen;
+    }
+    
+    // Construir ruta completa de destino (origen puede ser archivo/carpeta)
+    auto [ruta_destino_padre, nombre_destino] = obtenerPadreYNombre(path_destino);
+    
+    // Si el destino es solo una carpeta, mantener el nombre original
+    string nombre_final = nombre_destino;
+    if (nombre_destino.empty()) {
+        auto [_, nombre_orig] = obtenerPadreYNombre(path_origen);
+        nombre_final = nombre_orig;
+        path_destino = ruta_destino_padre + "/" + nombre_orig;
+    }
+    
+    // Verificar que no exista ya en destino
+    int inodo_destino = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path_destino);
+    if (inodo_destino != -1) {
+        return "ERROR: Ya existe un archivo/carpeta en destino: " + path_destino;
+    }
+    
+    // Verificar que la carpeta destino padre exista
+    int inodo_destino_padre = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_destino_padre);
+    if (inodo_destino_padre == -1) {
+        return "ERROR: La carpeta destino padre no existe: " + ruta_destino_padre;
+    }
+    
+    // Verificar permisos de escritura en destino padre
+    Inodo inodo_dest_padre;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_destino_padre, inodo_dest_padre)) {
+        return "ERROR: No se pudo leer inodo de destino padre";
+    }
+    
+    bool puede_escribir = (sesion_actual.usuario == "root");
+    if (!puede_escribir && inodo_dest_padre.i_uid == sesion_actual.uid) {
+        puede_escribir = (inodo_dest_padre.i_perm[0] == '6' || inodo_dest_padre.i_perm[0] == '7');
+    }
+    
+    if (!puede_escribir) {
+        return "ERROR: No tiene permisos de escritura en la carpeta destino: " + ruta_destino_padre;
+    }
+    
+    // Copiar segun tipo (archivo o carpeta)
+    if (inodo_orig.i_type == 1) {
+        // Es archivo: copiar contenido
+        string contenido = leerArchivoCompleto(m.path_disco, sb, path_origen);
+        
+        // Crear nuevo archivo en destino
+        string resultado = mkfileInterno(m.path_disco, sb, path_destino, contenido, sesion_actual.uid, sesion_actual.gid);
+        if (resultado != "OK") {
+            return resultado;
+        }
+    } else {
+        // Carpeta: crear carpeta vacia en destino
+        string resultado = mkdirInterno(m.path_disco, sb, path_destino, sesion_actual.uid, sesion_actual.gid);
+        if (resultado != "OK") {
+            return resultado;
+        }
+        
+        // Copiar contenido recursivamente para carpetas
+    }
+    
+    registrarEnJournal(m.path_disco, m.part_start, "COPY", path_origen + " -> " + path_destino, "");
+    
+    return "COPY: '" + path_origen + "' copiado a '" + path_destino + "' exitosamente";
+}
+
+>>>>>>> 5545c33 (Implementacion de COPY)
 // --- FUNCION: rename (cambiar nombre de archivo o carpeta) ---
 string renameItem(string path, string nuevo_nombre) {
     // Verificar sesion activa
@@ -4137,6 +4323,42 @@ string procesar_comando(const string& comando) {
         return removeItem(path);
     }
 
+<<<<<<< HEAD
+=======
+    // COPY: Copiar archivo o carpeta
+    else if (comando.find("copy") == 0) {
+        string path = "", destino = "";
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-destino=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 9);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                destino = valor.substr(1, cierre - 1);
+            } else {
+                destino = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (path.empty() || destino.empty()) {
+            return "ERROR: Faltan parametros para COPY";
+        }
+        
+        return copyItem(path, destino);
+    }
+
+>>>>>>> 5545c33 (Implementacion de COPY)
     // RENAME: Cambiar nombre de archivo o carpeta
     else if (comando.find("rename") == 0) {
         string path = "";
