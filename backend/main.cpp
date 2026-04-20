@@ -2907,6 +2907,116 @@ string removeItem(string path) {
     return "REMOVE: '" + path + "' eliminado exitosamente";
 }
 
+// --- FUNCION: rename (cambiar nombre de archivo o carpeta) ---
+string renameItem(string path, string nuevo_nombre) {
+    // Verificar sesion activa
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    // Buscar particion montada
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Verificar que existe el archivo/carpeta
+    int inodo_renombrar = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path);
+    if (inodo_renombrar == -1) {
+        return "ERROR: No existe la ruta: " + path;
+    }
+    cout << "DEBUG: inodo_renombrar = " << inodo_renombrar << endl;
+    
+    // Obtener padre y nombre actual
+    auto [ruta_padre, nombre_actual] = obtenerPadreYNombre(path);
+    cout << "DEBUG: ruta_padre = " << ruta_padre << ", nombre_actual = " << nombre_actual << endl;
+    
+    int inodo_padre = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre);
+    if (inodo_padre == -1) {
+        return "ERROR: No existe la carpeta padre";
+    }
+    cout << "DEBUG: inodo_padre = " << inodo_padre << endl;
+    
+    // Verificar que el nuevo nombre no exista
+    string ruta_nueva = (ruta_padre == "/" ? "/" + nuevo_nombre : ruta_padre + "/" + nuevo_nombre);
+    int inodo_existente = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_nueva);
+    if (inodo_existente != -1) {
+        return "ERROR: Ya existe un archivo/carpeta con nombre '" + nuevo_nombre + "'";
+    }
+    
+    // Verificar permisos de escritura
+    Inodo inodo;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_renombrar, inodo)) {
+        return "ERROR: No se pudo leer el inodo";
+    }
+    
+    bool tiene_permiso = (sesion_actual.usuario == "root");
+    if (!tiene_permiso && inodo.i_uid == sesion_actual.uid) {
+        tiene_permiso = (inodo.i_perm[0] == '6' || inodo.i_perm[0] == '7');
+    }
+    
+    if (!tiene_permiso) {
+        return "ERROR: No tiene permisos de escritura para renombrar: " + path;
+    }
+    
+    // Leer el inodo de la carpeta padre
+    Inodo inodo_padre_obj;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_padre, inodo_padre_obj)) {
+        return "ERROR: No se pudo leer inodo padre";
+    }
+    
+    // Buscar la entrada en la carpeta padre y cambiar el nombre
+    bool encontrado = false;
+    for (int i = 0; i < 12 && inodo_padre_obj.i_block[i] != -1; i++) {
+        cout << "DEBUG: Revisando bloque " << i << " de la carpeta padre" << endl;
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo == inodo_renombrar) {
+                    cout << "DEBUG: Encontrado en bloque " << i << ", posicion " << j << endl;
+                    cout << "DEBUG: Nombre actual: " << bloque.b_content[j].b_name << endl;
+                    
+                    // Limpiar el nombre actual y copiar el nuevo
+                    memset(bloque.b_content[j].b_name, 0, 12);
+                    strcpy(bloque.b_content[j].b_name, nuevo_nombre.c_str());
+                    
+                    cout << "DEBUG: Nuevo nombre: " << bloque.b_content[j].b_name << endl;
+                    
+                    // Escribir el bloque actualizado
+                    if (!escribirBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
+                        return "ERROR: No se pudo escribir el bloque actualizado";
+                    }
+                    cout << "DEBUG: Bloque escrito correctamente" << endl;
+                    encontrado = true;
+                    break;
+                }
+            }
+        }
+        if (encontrado) break;
+    }
+    
+    if (!encontrado) {
+        return "ERROR: No se encontro la entrada en la carpeta padre";
+    }
+    
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "RENAME", path + " -> " + nuevo_nombre, "");
+    
+    return "RENAME: '" + path + "' renombrado a '" + nuevo_nombre + "' exitosamente";
+}
 
 // ******** FUNCIONES DE REPORTES ********
 
@@ -4027,6 +4137,43 @@ string procesar_comando(const string& comando) {
         return removeItem(path);
     }
 
+    // RENAME: Cambiar nombre de archivo o carpeta
+    else if (comando.find("rename") == 0) {
+        string path = "";
+        string nuevo_nombre = "";
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-name=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                nuevo_nombre = valor.substr(1, cierre - 1);
+            } else {
+                nuevo_nombre = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (path.empty()) {
+            return "ERROR: Falta parametro -path para RENAME";
+        }
+        if (nuevo_nombre.empty()) {
+            return "ERROR: Falta parametro -name para RENAME";
+        }
+        
+        return renameItem(path, nuevo_nombre);
+    }
+
     // REP: Genaracion de reportes
     else if (comando.find("rep") == 0) {
         string name = "", path = "", id = "", path_file_ls = "";
@@ -4320,6 +4467,48 @@ string obtenerJournalEntradas(string id) {
     return resultado.str();
 }
 
+// --- FUNCION TEMPORAL: debugRaiz ---
+string debugRaiz(string id) {
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    stringstream resultado;
+    resultado << "=== BLOQUES DE CARPETA RAIZ ===\n";
+    
+    Inodo raiz;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, 0, raiz)) {
+        return "ERROR: No se pudo leer inodo raiz";
+    }
+    
+    for (int i = 0; i < 12 && raiz.i_block[i] != -1; i++) {
+        resultado << "Bloque " << i << " (posicion " << raiz.i_block[i] << "):\n";
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, raiz.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo != -1) {
+                    resultado << "  [" << j << "] " << bloque.b_content[j].b_name 
+                              << " -> inodo " << bloque.b_content[j].b_inodo << "\n";
+                }
+            }
+        }
+    }
+    
+    return resultado.str();
+}
+
 // MAIN CON CORS 
 int main() {
     crow::SimpleApp app;
@@ -4424,6 +4613,19 @@ int main() {
         string id = body["id"].s();
         string resultado = obtenerJournalEntradas(id);
         
+        crow::json::wvalue respuesta;
+        respuesta["contenido"] = resultado;
+        return crow::response(respuesta);
+    });
+
+    // Ruta para debug
+    CROW_ROUTE(app, "/debugRaiz").methods("POST"_method)([](const crow::request& req){
+        auto body = crow::json::load(req.body);
+        if (!body) {
+            return crow::response(400, "JSON invalido");
+        }
+        string id = body["id"].s();
+        string resultado = debugRaiz(id);
         crow::json::wvalue respuesta;
         respuesta["contenido"] = resultado;
         return crow::response(respuesta);
