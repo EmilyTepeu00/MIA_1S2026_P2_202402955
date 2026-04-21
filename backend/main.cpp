@@ -3316,6 +3316,83 @@ string renameItem(string path, string nuevo_nombre) {
     return "RENAME: '" + path + "' renombrado a '" + nuevo_nombre + "' exitosamente";
 }
 
+// --- FUNCION: find (buscar archivos por nombre) ---
+string find(string path, string name) {
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    stringstream resultado;
+    resultado << "=== BUSQUEDA: " << name << " en " << path << " ===\n";
+    
+    // Función recursiva para buscar
+    function<void(int, string)> buscar = [&](int inodo_actual, string ruta_actual) {
+        Inodo inodo;
+        if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_actual, inodo)) return;
+        
+        if (inodo.i_type != 0) return; // Solo carpetas
+        
+        for (int i = 0; i < 12 && inodo.i_block[i] != -1; i++) {
+            BloqueCarpeta bloque;
+            if (!leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo.i_block[i], bloque)) continue;
+            
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo != -1) {
+                    string nombre(bloque.b_content[j].b_name);
+                    if (nombre == "." || nombre == "..") continue;
+                    
+                    string ruta_completa = (ruta_actual == "/" ? "/" + nombre : ruta_actual + "/" + nombre);
+                    
+                    // Comparar con comodines
+                    bool coincide = false;
+                    if (name.find('*') != string::npos) {
+                        string patron = name;
+                        patron.erase(remove(patron.begin(), patron.end(), '*'), patron.end());
+                        coincide = (nombre.find(patron) != string::npos);
+                    } else if (name.find('?') != string::npos) {
+                        coincide = (nombre.length() == name.length());
+                    } else {
+                        coincide = (nombre == name);
+                    }
+                    
+                    if (coincide) {
+                        Inodo inodo_hijo;
+                        if (leerInodo(m.path_disco, sb.s_inode_start, bloque.b_content[j].b_inodo, inodo_hijo)) {
+                            resultado << ruta_completa << " (" << (inodo_hijo.i_type == 0 ? "DIR" : "FILE") << ")\n";
+                        }
+                    }
+                    
+                    buscar(bloque.b_content[j].b_inodo, ruta_completa);
+                }
+            }
+        }
+    };
+    
+    int inodo_inicio = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path);
+    if (inodo_inicio == -1) return "ERROR: Ruta no existe: " + path;
+    
+    buscar(inodo_inicio, path);
+    
+    return resultado.str();
+}
+
 // ******** FUNCIONES DE REPORTES ********
 
 // GENERAR REPORTE MBR
@@ -4536,6 +4613,39 @@ string procesar_comando(const string& comando) {
         }
         
         return renameItem(path, nuevo_nombre);
+    }
+
+    // FIND: buscar archivos por nombre
+    else if (comando.find("find") == 0) {
+        string path = "", name = "";
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-name=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                name = valor.substr(1, cierre - 1);
+            } else {
+                name = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (path.empty() || name.empty()) {
+            return "ERROR: Faltan parametros para FIND";
+        }
+        
+        return find(path, name);
     }
 
     // REP: Genaracion de reportes
