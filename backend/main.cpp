@@ -3236,23 +3236,23 @@ string renameItem(string path, string nuevo_nombre) {
     if (inodo_renombrar == -1) {
         return "ERROR: No existe la ruta: " + path;
     }
-    cout << "DEBUG: inodo_renombrar = " << inodo_renombrar << endl;
+    cout << "DEBUG: inodo a renombrar = " << inodo_renombrar << endl;
     
     // Obtener padre y nombre actual
     auto [ruta_padre, nombre_actual] = obtenerPadreYNombre(path);
-    cout << "DEBUG: ruta_padre = " << ruta_padre << ", nombre_actual = " << nombre_actual << endl;
-    
     int inodo_padre = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre);
+    
     if (inodo_padre == -1) {
         return "ERROR: No existe la carpeta padre";
     }
-    cout << "DEBUG: inodo_padre = " << inodo_padre << endl;
+    cout << "DEBUG: inodo padre = " << inodo_padre << endl;
+    cout << "DEBUG: nombre actual = " << nombre_actual << endl;
     
-    // Verificar que el nuevo nombre no exista
+    // Construir nueva ruta para verificar que no exista
     string ruta_nueva = (ruta_padre == "/" ? "/" + nuevo_nombre : ruta_padre + "/" + nuevo_nombre);
     int inodo_existente = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_nueva);
     if (inodo_existente != -1) {
-        return "ERROR: Ya existe un archivo/carpeta con nombre '" + nuevo_nombre + "'";
+        return "ERROR: Ya existe un archivo/carpeta con nombre '" + nuevo_nombre + "' en esta ubicacion";
     }
     
     // Verificar permisos de escritura
@@ -3279,19 +3279,19 @@ string renameItem(string path, string nuevo_nombre) {
     // Buscar la entrada en la carpeta padre y cambiar el nombre
     bool encontrado = false;
     for (int i = 0; i < 12 && inodo_padre_obj.i_block[i] != -1; i++) {
-        cout << "DEBUG: Revisando bloque " << i << " de la carpeta padre" << endl;
         BloqueCarpeta bloque;
         if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
             for (int j = 0; j < 4; j++) {
                 if (bloque.b_content[j].b_inodo == inodo_renombrar) {
                     cout << "DEBUG: Encontrado en bloque " << i << ", posicion " << j << endl;
-                    cout << "DEBUG: Nombre actual: " << bloque.b_content[j].b_name << endl;
+                    cout << "DEBUG: Nombre actual en bloque: " << bloque.b_content[j].b_name << endl;
                     
-                    // Limpiar el nombre actual y copiar el nuevo
+                    // Limpiar el nombre actual
                     memset(bloque.b_content[j].b_name, 0, 12);
+                    // Copiar el nuevo nombre
                     strcpy(bloque.b_content[j].b_name, nuevo_nombre.c_str());
                     
-                    cout << "DEBUG: Nuevo nombre: " << bloque.b_content[j].b_name << endl;
+                    cout << "DEBUG: Nuevo nombre escrito: " << bloque.b_content[j].b_name << endl;
                     
                     // Escribir el bloque actualizado
                     if (!escribirBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_obj.i_block[i], bloque)) {
@@ -4772,6 +4772,50 @@ string listarDirectorio(string id, string ruta) {
     return resultado.str();
 }
 
+// --- FUNCION TEMPORAL: debugCarpeta ---
+string debugCarpeta(string id, string ruta) {
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    int inodo_dir = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta);
+    if (inodo_dir == -1) return "ERROR: No existe la ruta: " + ruta;
+    
+    Inodo dir_inodo;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_dir, dir_inodo)) {
+        return "ERROR: No se pudo leer inodo";
+    }
+    
+    stringstream resultado;
+    resultado << "=== CONTENIDO DE " << ruta << " ===\n";
+    
+    for (int i = 0; i < 12 && dir_inodo.i_block[i] != -1; i++) {
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, dir_inodo.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo != -1) {
+                    resultado << "  [" << j << "] " << bloque.b_content[j].b_name 
+                              << " -> inodo " << bloque.b_content[j].b_inodo << "\n";
+                }
+            }
+        }
+    }
+    
+    return resultado.str();
+}
+
 // --- FUNCION: obtenerJournalEntradas ---
 string obtenerJournalEntradas(string id) {
     // Buscar particion montada
@@ -4942,7 +4986,17 @@ int main() {
             respuesta["contenido"] = resultado;
             
             return crow::response(respuesta);
-        });    
+        });
+        
+    CROW_ROUTE(app, "/debugCarpeta").methods("POST"_method)([](const crow::request& req){
+        auto body = crow::json::load(req.body);
+        string id = body["id"].s();
+        string ruta = body["ruta"].s();
+        string resultado = debugCarpeta(id, ruta);
+        crow::json::wvalue respuesta;
+        respuesta["contenido"] = resultado;
+        return crow::response(respuesta);
+    });
 
     // Ruta GET para obtener lista de discos
     CROW_ROUTE(app, "/obtenerDiscos")
