@@ -1753,13 +1753,23 @@ string mkfs(string id, string type, string fs) {
     disco.seekp(sb.s_block_start);
     BloqueCarpeta bloque_raiz;
     memset(&bloque_raiz, 0, sizeof(BloqueCarpeta));
+    
+    // Entrada 0: "." (esta carpeta)
     strcpy(bloque_raiz.b_content[0].b_name, ".");
     bloque_raiz.b_content[0].b_inodo = 0;
+    
+    // Entrada 1: ".." (carpeta padre)
     strcpy(bloque_raiz.b_content[1].b_name, "..");
     bloque_raiz.b_content[1].b_inodo = 0;
-    for (int i = 2; i < 4; i++) {
-        bloque_raiz.b_content[i].b_inodo = -1;
-    }
+    
+    // Entrada 2: vacía (para users.txt)
+    bloque_raiz.b_content[2].b_inodo = -1;
+    memset(bloque_raiz.b_content[2].b_name, 0, 12);
+    
+    // Entrada 3: vacía
+    bloque_raiz.b_content[3].b_inodo = -1;
+    memset(bloque_raiz.b_content[3].b_name, 0, 12);
+    
     disco.write(reinterpret_cast<const char*>(&bloque_raiz), sizeof(BloqueCarpeta));
     
     // 15. Actualizar bitmap de bloques (bloque 0 ocupado)
@@ -1770,87 +1780,57 @@ string mkfs(string id, string type, string fs) {
     // 16. Crear archivo users.txt
     string users_content = "1,G,root\n1,U,root,root,123\n";
     
-    // Buscar inodo libre para users.txt
-    int users_inodo_pos = -1;
-    for (int i = 1; i < n; i++) {
-        disco.seekg(sb.s_bm_inode_start + i);
-        char bit;
-        disco.read(&bit, 1);
-        if (bit == 0) {
-            users_inodo_pos = i;
-            break;
-        }
-    }
+    // Usar inodo 1 para users.txt
+    int users_inodo_pos = 1;
+    int users_bloque = 1;
     
-    if (users_inodo_pos != -1) {
-        // Crear inodo para users.txt
-        Inodo users_inodo;
-        users_inodo.i_uid = 1;
-        users_inodo.i_gid = 1;
-        users_inodo.i_size = users_content.length();
-        users_inodo.i_atime = time(nullptr);
-        users_inodo.i_ctime = time(nullptr);
-        users_inodo.i_mtime = time(nullptr);
-        users_inodo.i_type = 1;  // Archivo
-        users_inodo.i_perm[0] = '6';
-        users_inodo.i_perm[1] = '6';
-        users_inodo.i_perm[2] = '4';
-        for (int i = 0; i < 15; i++) users_inodo.i_block[i] = -1;
-        
-        // Buscar bloque libre
-        int users_bloque = -1;
-        for (int i = 1; i < 3 * n; i++) {
-            disco.seekg(sb.s_bm_block_start + i);
-            char bit;
-            disco.read(&bit, 1);
-            if (bit == 0) {
-                users_bloque = i;
-                break;
-            }
-        }
-        
-        if (users_bloque != -1) {
-            users_inodo.i_block[0] = users_bloque;
-            
-            // Marcar bloque como ocupado
-            disco.seekp(sb.s_bm_block_start + users_bloque);
-            char bit = 1;
-            disco.write(&bit, 1);
-            
-            // Escribir contenido en el bloque
-            BloqueArchivo bloque_users;
-            memset(bloque_users.b_content, 0, 64);
-            strncpy(bloque_users.b_content, users_content.c_str(), users_content.length());
-            
-            disco.seekp(sb.s_block_start + users_bloque * 64);
-            disco.write(reinterpret_cast<const char*>(&bloque_users), sizeof(BloqueArchivo));
-            
-            // Marcar inodo como ocupado
-            disco.seekp(sb.s_bm_inode_start + users_inodo_pos);
-            bit = 1;
-            disco.write(&bit, 1);
-            
-            // Escribir inodo
-            disco.seekp(sb.s_inode_start + users_inodo_pos * sizeof(Inodo));
-            disco.write(reinterpret_cast<const char*>(&users_inodo), sizeof(Inodo));
-            
-            // Agregar entrada en la raiz
-            disco.seekp(sb.s_block_start);
-            BloqueCarpeta bloque_raiz_actual;
-            disco.read(reinterpret_cast<char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
-            
-            for (int j = 0; j < 4; j++) {
-                if (bloque_raiz_actual.b_content[j].b_inodo == -1) {
-                    strcpy(bloque_raiz_actual.b_content[j].b_name, "users.txt");
-                    bloque_raiz_actual.b_content[j].b_inodo = users_inodo_pos;
-                    break;
-                }
-            }
-            
-            disco.seekp(sb.s_block_start);
-            disco.write(reinterpret_cast<const char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
-        }
-    }
+    // Crear inodo para users.txt
+    Inodo users_inodo;
+    users_inodo.i_uid = 1;
+    users_inodo.i_gid = 1;
+    users_inodo.i_size = users_content.length();
+    users_inodo.i_atime = time(nullptr);
+    users_inodo.i_ctime = time(nullptr);
+    users_inodo.i_mtime = time(nullptr);
+    users_inodo.i_type = 1;  // Archivo
+    users_inodo.i_perm[0] = '6';
+    users_inodo.i_perm[1] = '6';
+    users_inodo.i_perm[2] = '4';
+    for (int i = 0; i < 15; i++) users_inodo.i_block[i] = -1;
+    users_inodo.i_block[0] = users_bloque;
+    
+    // Marcar bloque como ocupado
+    disco.seekp(sb.s_bm_block_start + users_bloque);
+    char bit = 1;
+    disco.write(&bit, 1);
+    
+    // Escribir contenido en el bloque
+    BloqueArchivo bloque_users;
+    memset(bloque_users.b_content, 0, 64);
+    strncpy(bloque_users.b_content, users_content.c_str(), users_content.length());
+    
+    disco.seekp(sb.s_block_start + users_bloque * 64);
+    disco.write(reinterpret_cast<const char*>(&bloque_users), sizeof(BloqueArchivo));
+    
+    // Marcar inodo como ocupado
+    disco.seekp(sb.s_bm_inode_start + users_inodo_pos);
+    bit = 1;
+    disco.write(&bit, 1);
+    
+    // Escribir inodo
+    disco.seekp(sb.s_inode_start + users_inodo_pos * sizeof(Inodo));
+    disco.write(reinterpret_cast<const char*>(&users_inodo), sizeof(Inodo));
+    
+    // Actualizar la raiz: agregar users.txt en la entrada 2
+    disco.seekp(sb.s_block_start);
+    BloqueCarpeta bloque_raiz_actual;
+    disco.read(reinterpret_cast<char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
+    
+    strcpy(bloque_raiz_actual.b_content[2].b_name, "users.txt");
+    bloque_raiz_actual.b_content[2].b_inodo = users_inodo_pos;
+    
+    disco.seekp(sb.s_block_start);
+    disco.write(reinterpret_cast<const char*>(&bloque_raiz_actual), sizeof(BloqueCarpeta));
     
     disco.close();
     delete[] bm_inodos;
