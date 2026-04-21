@@ -2978,8 +2978,6 @@ string removeItem(string path) {
     return "REMOVE: '" + path + "' eliminado exitosamente";
 }
 
-<<<<<<< HEAD
-=======
 // --- FUNCION: copy (copiar archivo o carpeta) ---
 string copyItem(string path_origen, string path_destino) {
     // Verificar sesion activa
@@ -3092,7 +3090,141 @@ string copyItem(string path_origen, string path_destino) {
     return "COPY: '" + path_origen + "' copiado a '" + path_destino + "' exitosamente";
 }
 
->>>>>>> 5545c33 (Implementacion de COPY)
+// --- FUNCION: move (mover archivo o carpeta) ---
+string moveItem(string path_origen, string path_destino) {
+    // Verificar sesion activa
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    // Buscar particion montada
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    // Obtener superbloque
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Verificar que existe el origen
+    int inodo_origen = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path_origen);
+    if (inodo_origen == -1) {
+        return "ERROR: No existe la ruta de origen: " + path_origen;
+    }
+    
+    // Obtener padre y nombre del origen
+    auto [ruta_padre_origen, nombre_origen] = obtenerPadreYNombre(path_origen);
+    
+    // Construir ruta destino completa
+    auto [ruta_padre_destino, nombre_destino] = obtenerPadreYNombre(path_destino);
+    string nombre_final = nombre_destino.empty() ? nombre_origen : nombre_destino;
+    string ruta_destino_completa = ruta_padre_destino + "/" + nombre_final;
+    
+    // Verificar que no exista ya en destino
+    int inodo_destino = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_destino_completa);
+    if (inodo_destino != -1) {
+        return "ERROR: Ya existe un archivo/carpeta en destino: " + ruta_destino_completa;
+    }
+    
+    // Verificar permisos de escritura en origen, para mover
+    Inodo inodo_orig;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_origen, inodo_orig)) {
+        return "ERROR: No se pudo leer el inodo de origen";
+    }
+    
+    bool puede_mover = (sesion_actual.usuario == "root");
+    if (!puede_mover && inodo_orig.i_uid == sesion_actual.uid) {
+        puede_mover = (inodo_orig.i_perm[0] == '6' || inodo_orig.i_perm[0] == '7');
+    }
+    
+    if (!puede_mover) {
+        return "ERROR: No tiene permisos para mover: " + path_origen;
+    }
+    
+    // Verificar que la carpeta destino padre exista
+    int inodo_destino_padre = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre_destino);
+    if (inodo_destino_padre == -1) {
+        return "ERROR: La carpeta destino padre no existe: " + ruta_padre_destino;
+    }
+    
+    // Verificar permisos de escritura en destino padre
+    Inodo inodo_dest_padre;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_destino_padre, inodo_dest_padre)) {
+        return "ERROR: No se pudo leer inodo de destino padre";
+    }
+    
+    bool puede_escribir = (sesion_actual.usuario == "root");
+    if (!puede_escribir && inodo_dest_padre.i_uid == sesion_actual.uid) {
+        puede_escribir = (inodo_dest_padre.i_perm[0] == '6' || inodo_dest_padre.i_perm[0] == '7');
+    }
+    
+    if (!puede_escribir) {
+        return "ERROR: No tiene permisos de escritura en la carpeta destino: " + ruta_padre_destino;
+    }
+    
+    // Agregar entrada en carpeta destino
+    Inodo inodo_dest_padre_obj;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_destino_padre, inodo_dest_padre_obj)) {
+        return "ERROR: No se pudo leer inodo destino padre";
+    }
+    
+    bool entrada_agregada = false;
+    for (int i = 0; i < 12 && inodo_dest_padre_obj.i_block[i] != -1; i++) {
+        BloqueCarpeta bloque;
+        if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_dest_padre_obj.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo == -1) {
+                    strcpy(bloque.b_content[j].b_name, nombre_final.c_str());
+                    bloque.b_content[j].b_inodo = inodo_origen;
+                    escribirBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_dest_padre_obj.i_block[i], bloque);
+                    entrada_agregada = true;
+                    break;
+                }
+            }
+        }
+        if (entrada_agregada) break;
+    }
+    
+    if (!entrada_agregada) {
+        return "ERROR: No hay espacio en carpeta destino";
+    }
+    
+    // Eliminar entrada de carpeta origen
+    int inodo_padre_origen_int = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, ruta_padre_origen);
+    if (inodo_padre_origen_int != -1) {
+        Inodo inodo_padre_origen_obj;
+        if (leerInodo(m.path_disco, sb.s_inode_start, inodo_padre_origen_int, inodo_padre_origen_obj)) {
+            for (int i = 0; i < 12 && inodo_padre_origen_obj.i_block[i] != -1; i++) {
+                BloqueCarpeta bloque;
+                if (leerBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_origen_obj.i_block[i], bloque)) {
+                    for (int j = 0; j < 4; j++) {
+                        if (bloque.b_content[j].b_inodo == inodo_origen) {
+                            bloque.b_content[j].b_inodo = -1;
+                            memset(bloque.b_content[j].b_name, 0, 12);
+                            escribirBloqueCarpeta(m.path_disco, sb.s_block_start, inodo_padre_origen_obj.i_block[i], bloque);
+                            break;
+                        }
+                    }
+                }
+            }
+        }
+    }
+    
+    registrarEnJournal(m.path_disco, m.part_start, "MOVE", path_origen + " -> " + ruta_destino_completa, "");
+    
+    return "MOVE: '" + path_origen + "' movido a '" + ruta_destino_completa + "' exitosamente";
+}
+
 // --- FUNCION: rename (cambiar nombre de archivo o carpeta) ---
 string renameItem(string path, string nuevo_nombre) {
     // Verificar sesion activa
@@ -4323,8 +4455,6 @@ string procesar_comando(const string& comando) {
         return removeItem(path);
     }
 
-<<<<<<< HEAD
-=======
     // COPY: Copiar archivo o carpeta
     else if (comando.find("copy") == 0) {
         string path = "", destino = "";
@@ -4358,7 +4488,39 @@ string procesar_comando(const string& comando) {
         return copyItem(path, destino);
     }
 
->>>>>>> 5545c33 (Implementacion de COPY)
+    // MOVE: Mover archivo o carpeta
+    else if (comando.find("move") == 0) {
+        string path = "", destino = "";
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-destino=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 9);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                destino = valor.substr(1, cierre - 1);
+            } else {
+                destino = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (path.empty() || destino.empty()) {
+            return "ERROR: Faltan parametros para MOVE";
+        }
+        
+        return moveItem(path, destino);
+    }
+
     // RENAME: Cambiar nombre de archivo o carpeta
     else if (comando.find("rename") == 0) {
         string path = "";
