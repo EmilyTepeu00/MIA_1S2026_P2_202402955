@@ -3393,6 +3393,76 @@ string find(string path, string name) {
     return resultado.str();
 }
 
+// --- FUNCION: chown (cambiar propietario) ---
+string chown(string path, string usuario, bool recursivo) {
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    if (sesion_actual.usuario != "root") {
+        return "ERROR: Solo root puede cambiar el propietario";
+    }
+    
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Leer users.txt para obtener el UID del usuario
+    string users = leerArchivo(m.path_disco, sb.s_inode_start, sb.s_block_start, 
+                               sb.s_bm_block_start, sb.s_blocks_count, "/users.txt");
+    
+    int nuevo_uid = -1;
+    stringstream ss(users);
+    string linea;
+    while (getline(ss, linea)) {
+        vector<string> partes;
+        stringstream ss2(linea);
+        string parte;
+        while (getline(ss2, parte, ',')) {
+            partes.push_back(parte);
+        }
+        if (partes.size() >= 5 && partes[1] == "U" && partes[3] == usuario) {
+            nuevo_uid = stoi(partes[0]);
+            break;
+        }
+    }
+    
+    if (nuevo_uid == -1) {
+        return "ERROR: Usuario '" + usuario + "' no existe";
+    }
+    
+    int inodo = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path);
+    if (inodo == -1) return "ERROR: Ruta no existe: " + path;
+    
+    Inodo inodo_obj;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo, inodo_obj)) {
+        return "ERROR: No se pudo leer inodo";
+    }
+    
+    inodo_obj.i_uid = nuevo_uid;
+    
+    if (!escribirInodo(m.path_disco, sb.s_inode_start, inodo, inodo_obj)) {
+        return "ERROR: No se pudo escribir inodo";
+    }
+    
+    // Si es recursivo, hay que implementarlo (opcional)
+    
+    return "CHOWN: Propietario de '" + path + "' cambiado a '" + usuario + "'";
+}
+
 // ******** FUNCIONES DE REPORTES ********
 
 // GENERAR REPORTE MBR
@@ -4646,6 +4716,44 @@ string procesar_comando(const string& comando) {
         }
         
         return find(path, name);
+    }
+
+    // CHOWN: Cambiar propietario
+    else if (comando.find("chown") == 0) {
+        string path = "", usuario = "";
+        bool recursivo = false;
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-usuario=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 9);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                usuario = valor.substr(1, cierre - 1);
+            } else {
+                usuario = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (comando.find("-r") != string::npos) {
+            recursivo = true;
+        }
+        
+        if (path.empty() || usuario.empty()) {
+            return "ERROR: Faltan parametros para CHOWN";
+        }
+        
+        return chown(path, usuario, recursivo);
     }
 
     // REP: Genaracion de reportes
