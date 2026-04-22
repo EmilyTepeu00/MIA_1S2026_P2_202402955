@@ -3580,39 +3580,144 @@ string loss(string id) {
 // ******** FUNCIONES DE REPORTES ********
 
 // GENERAR REPORTE MBR
-string generarReporteMBR(string path_disco, string path_jpg) {
+string generarReporteMBR(string path_disco, string path_jpg){
+
     MBR mbr;
-    if (!leerMBR(path_disco, mbr)) {
+
+    if(!leerMBR(path_disco,mbr)){
         return "ERROR: No se pudo leer el MBR";
     }
 
     string path_dot = path_jpg + ".tmp.dot";
+
     ofstream dot(path_dot.c_str());
-    
-    dot << "digraph G {" << endl;
-    dot << "  node [shape=record];" << endl;
-    dot << "  mbr [label=\"{MBR|Tamaño: " << mbr.mbr_size << " bytes|";
-    
-    char fecha[20];
-    struct tm *tm_info = localtime(&mbr.mbr_creation_date);
-    strftime(fecha, 20, "%d/%m/%Y %H:%M", tm_info);
-    dot << "Fecha: " << fecha << "|";
-    dot << "Signature: " << mbr.mbr_dsk_signature;
-    
-    for (int i = 0; i < 4; i++) {
-        if (mbr.mbr_partitions[i].part_size > 0) {
-            dot << "|{Part" << i+1 << "|" << mbr.mbr_partitions[i].part_name << "}";
-        }
+
+    if(!dot.is_open()){
+        return "ERROR: No pudo crearse archivo temporal";
     }
-    
-    dot << "}\"];" << endl;
-    dot << "}" << endl;
+
+    dot << "digraph G {\n";
+    dot << "node [shape=plaintext];\n";
+
+    dot << "mbr [label=<\n";
+
+    dot << "<TABLE BORDER='1' CELLBORDER='1' CELLSPACING='0' CELLPADDING='5'>\n";
+
+    // Titulo
+    dot << "<TR>";
+    dot << "<TD BGCOLOR='lightgray' COLSPAN='2'>";
+    dot << "<B>REPORTE MBR</B>";
+    dot << "</TD>";
+    dot << "</TR>\n";
+
+
+    // Datos mbr
+    dot << "<TR><TD><B>mbr_tamano</B></TD>";
+    dot << "<TD>" << mbr.mbr_size << " bytes</TD></TR>\n";
+
+
+    char fecha[50];
+    struct tm* tm_info = localtime(&mbr.mbr_creation_date);
+
+    if(tm_info)
+        strftime(fecha,50,"%d/%m/%Y %H:%M:%S",tm_info);
+    else
+        strcpy(fecha,"Fecha invalida");
+
+
+    dot << "<TR><TD><B>mbr_fecha_creacion</B></TD>";
+    dot << "<TD>" << fecha << "</TD></TR>\n";
+
+
+    dot << "<TR><TD><B>mbr_dsk_signature</B></TD>";
+    dot << "<TD>" << mbr.mbr_dsk_signature << "</TD></TR>\n";
+
+
+    // Peticiones
+    for(int i=0;i<4;i++){
+
+        if(mbr.mbr_partitions[i].part_size <= 0)
+            continue;
+
+
+        dot << "<TR>";
+        dot << "<TD BGCOLOR='lightblue' COLSPAN='2'>";
+        dot << "<B>PARTICION " << (i+1) << "</B>";
+        dot << "</TD>";
+        dot << "</TR>\n";
+
+
+        string status =
+            (mbr.mbr_partitions[i].part_status=='\0')
+            ? "0"
+            : string(1,mbr.mbr_partitions[i].part_status);
+
+        string tipo =
+            (mbr.mbr_partitions[i].part_type=='\0')
+            ? "0"
+            : string(1,mbr.mbr_partitions[i].part_type);
+
+        string fit =
+            (mbr.mbr_partitions[i].part_fit=='\0')
+            ? "0"
+            : string(1,mbr.mbr_partitions[i].part_fit);
+
+
+        char nombre[17]={0};
+        memcpy(nombre,mbr.mbr_partitions[i].part_name,16);
+
+
+        char pid[8]={0};
+        memcpy(pid,mbr.mbr_partitions[i].part_id,7);
+
+
+        dot << "<TR><TD><B>part_status</B></TD>";
+        dot << "<TD>" << status << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_type</B></TD>";
+        dot << "<TD>" << tipo << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_fit</B></TD>";
+        dot << "<TD>" << fit << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_start</B></TD>";
+        dot << "<TD>" << mbr.mbr_partitions[i].part_start << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_size</B></TD>";
+        dot << "<TD>" << mbr.mbr_partitions[i].part_size << " bytes</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_name</B></TD>";
+        dot << "<TD>" << nombre << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_correlative</B></TD>";
+        dot << "<TD>" << mbr.mbr_partitions[i].part_correlative << "</TD></TR>\n";
+
+        dot << "<TR><TD><B>part_id</B></TD>";
+        dot << "<TD>" << pid << "</TD></TR>\n";
+    }
+
+
+    dot << "</TABLE>\n";
+    dot << ">];\n";
+    dot << "}\n";
+
     dot.close();
-    
-    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_jpg + "\" 2>/dev/null";
+
+
+    // Generar imagen
+    string comando =
+        "dot -Tjpg \"" +
+        path_dot +
+        "\" -o \"" +
+        path_jpg +
+        "\" 2>/dev/null";
+
     system(comando.c_str());
+
+
+    // Borrar temporal .dot
     remove(path_dot.c_str());
-    
+
     return "Reporte MBR generado en " + path_jpg;
 }
 
@@ -3680,37 +3785,37 @@ string generarReporteDISK(string path_disco, string path_jpg) {
 }
 
 // GENERAR REPORTE EBR
-string generarReporteEBR(string path_disco, string path_jpg, int start) {
+string generarReporteEBRTable(string path_disco, string path_jpg, int start_extendida) {
     string path_dot = path_jpg + ".tmp.dot";
     ofstream dot(path_dot.c_str());
     
     dot << "digraph G {" << endl;
-    dot << "  node [shape=record];" << endl;
-    dot << "  rankdir=LR;" << endl;
+    dot << "  node [shape=plaintext];" << endl;
+    dot << "  ebr [label=<" << endl;
+    dot << "    <table border='1' cellborder='1' cellspacing='0' cellpadding='5'>" << endl;
+    dot << "      <tr><td bgcolor='lightgray' colspan='2'><b>REPORTE EBR</b></td></tr>" << endl;
     
-    int ebr_pos = start;
+    int ebr_pos = start_extendida;
     EBR ebr;
     int contador = 0;
     
     while (ebr_pos != -1) {
         if (!leerEBR(path_disco, ebr_pos, ebr)) break;
         
-        dot << "  ebr" << contador << " [label=\"{EBR " << contador << "|";
-        dot << "Mount: " << ebr.part_mount << "|";
-        dot << "Fit: " << ebr.part_fit << "|";
-        dot << "Start: " << ebr.part_start << "|";
-        dot << "Size: " << ebr.part_size << "|";
-        dot << "Next: " << ebr.part_next << "|";
-        dot << "Name: " << ebr.part_name << "}\"];" << endl;
-        
-        if (ebr.part_next != -1) {
-            dot << "  ebr" << contador << " -> ebr" << (contador+1) << ";" << endl;
-        }
+        dot << "      <tr><td bgcolor='lightblue' colspan='2'><b>UNIDAD LOGICA " << contador+1 << "</b></td></tr>" << endl;
+        dot << "      <tr><td><b>part_status</b></td><td>" << ebr.part_mount << "</td></tr>" << endl;
+        dot << "      <tr><td><b>part_fit</b></td><td>" << ebr.part_fit << "</td></tr>" << endl;
+        dot << "      <tr><td><b>part_start</b></td><td>" << ebr.part_start << "</td></tr>" << endl;
+        dot << "      <tr><td><b>part_size</b></td><td>" << ebr.part_size << " bytes</td></tr>" << endl;
+        dot << "      <tr><td><b>part_next</b></td><td>" << ebr.part_next << "</td></tr>" << endl;
+        dot << "      <tr><td><b>part_name</b></td><td>" << ebr.part_name << "</td></tr>" << endl;
         
         ebr_pos = ebr.part_next;
         contador++;
     }
     
+    dot << "    </table>" << endl;
+    dot << "  >];" << endl;
     dot << "}" << endl;
     dot.close();
     
@@ -4108,7 +4213,18 @@ string rep(string name, string path, string id, string path_file_ls) {
     }
     // Generar reporte EBR
     else if (name == "ebr") {
-        resultado = generarReporteEBR(m.path_disco, path, 168);
+        // Buscar la particion extendida para obtener su inicio
+        int start_extendida = 0;
+        MBR mbr;
+        if (leerMBR(m.path_disco, mbr)) {
+            for (int i = 0; i < 4; i++) {
+                if (mbr.mbr_partitions[i].part_type == 'E') {
+                    start_extendida = mbr.mbr_partitions[i].part_start;
+                    break;
+                }
+            }
+        }
+        resultado = generarReporteEBRTable(m.path_disco, path, start_extendida);
     }
     // Generar reporte inode (inoos usados)
     else if (name == "inode") {
