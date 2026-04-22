@@ -3458,9 +3458,66 @@ string chown(string path, string usuario, bool recursivo) {
         return "ERROR: No se pudo escribir inodo";
     }
     
-    // Si es recursivo, hay que implementarlo (opcional)
-    
     return "CHOWN: Propietario de '" + path + "' cambiado a '" + usuario + "'";
+}
+
+// --- FUNCION: chmod (cambiar permisos) ---
+string chmod(string path, string ugo, bool recursivo) {
+    if (!sesion_actual.activa) {
+        return "ERROR: No hay sesion activa";
+    }
+    
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == sesion_actual.id_particion) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    // Validar formato ugo (3 digitos del 0 al 7)
+    if (ugo.length() != 3) {
+        return "ERROR: Formato incorrecto. Use 3 digitos";
+    }
+    
+    for (int i = 0; i < 3; i++) {
+        if (ugo[i] < '0' || ugo[i] > '7') {
+            return "ERROR: Los permisos deben ser digitos del 0 al 7";
+        }
+    }
+    
+    int inodo = buscarInodoPorRuta(m.path_disco, sb.s_inode_start, sb.s_block_start, path);
+    if (inodo == -1) return "ERROR: Ruta no existe: " + path;
+    
+    Inodo inodo_obj;
+    if (!leerInodo(m.path_disco, sb.s_inode_start, inodo, inodo_obj)) {
+        return "ERROR: No se pudo leer inodo";
+    }
+    
+    // Verificar permisos: solo root o propietario puede cambiar permisos
+    if (sesion_actual.usuario != "root" && inodo_obj.i_uid != sesion_actual.uid) {
+        return "ERROR: No tiene permisos para cambiar permisos de este archivo";
+    }
+    
+    // Convertir ugo a caracteres
+    inodo_obj.i_perm[0] = ugo[0];
+    inodo_obj.i_perm[1] = ugo[1];
+    inodo_obj.i_perm[2] = ugo[2];
+    
+    if (!escribirInodo(m.path_disco, sb.s_inode_start, inodo, inodo_obj)) {
+        return "ERROR: No se pudo escribir inodo";
+    }
+    
+    return "CHMOD: Permisos de '" + path + "' cambiados a " + ugo;
 }
 
 // ******** FUNCIONES DE REPORTES ********
@@ -4754,6 +4811,44 @@ string procesar_comando(const string& comando) {
         }
         
         return chown(path, usuario, recursivo);
+    }
+
+    // CHMOD: Cambiar permisos
+    else if (comando.find("chmod") == 0) {
+        string path = "", ugo = "";
+        bool recursivo = false;
+        
+        size_t pos = comando.find("-path=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 6);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                path = valor.substr(1, cierre - 1);
+            } else {
+                path = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        pos = comando.find("-ugo=");
+        if (pos != string::npos) {
+            string valor = comando.substr(pos + 5);
+            if (valor[0] == '"') {
+                size_t cierre = valor.find('"', 1);
+                ugo = valor.substr(1, cierre - 1);
+            } else {
+                ugo = valor.substr(0, valor.find(' '));
+            }
+        }
+        
+        if (comando.find("-r") != string::npos) {
+            recursivo = true;
+        }
+        
+        if (path.empty() || ugo.empty()) {
+            return "ERROR: Faltan parametros para CHMOD";
+        }
+        
+        return chmod(path, ugo, recursivo);
     }
 
     // REP: Genaracion de reportes
