@@ -3520,6 +3520,63 @@ string chmod(string path, string ugo, bool recursivo) {
     return "CHMOD: Permisos de '" + path + "' cambiados a " + ugo;
 }
 
+// --- FUNCION: loss (simular perdida de sistema EXT3) ---
+string loss(string id) {
+    int idx = -1;
+    for (int i = 0; i < particiones_montadas.size(); i++) {
+        if (particiones_montadas[i].id == id) {
+            idx = i;
+            break;
+        }
+    }
+    
+    if (idx == -1) return "ERROR: Particion no encontrada";
+    
+    Montada& m = particiones_montadas[idx];
+    
+    Superblock sb;
+    if (!obtenerSuperblock(m.path_disco, m.part_start, sb)) {
+        return "ERROR: No se pudo leer superbloque";
+    }
+    
+    if (sb.s_filesystem_type != 3) {
+        return "ERROR: La particion no es EXT3";
+    }
+    
+    fstream disco(m.path_disco, ios::binary | ios::in | ios::out);
+    if (!disco.is_open()) return "ERROR: No se pudo abrir disco";
+    
+    // Limpiar bitmap de inodos
+    char* ceros = new char[sb.s_inodes_count]();
+    disco.seekp(sb.s_bm_inode_start);
+    disco.write(ceros, sb.s_inodes_count);
+    
+    // Limpiar bitmap de bloques
+    delete[] ceros;
+    ceros = new char[sb.s_blocks_count]();
+    disco.seekp(sb.s_bm_block_start);
+    disco.write(ceros, sb.s_blocks_count);
+    
+    // Limpiar area de inodos
+    delete[] ceros;
+    int tam_inodos = sb.s_inodes_count * sizeof(Inodo);
+    ceros = new char[tam_inodos]();
+    disco.seekp(sb.s_inode_start);
+    disco.write(ceros, tam_inodos);
+    
+    // Limpiar area de bloques
+    delete[] ceros;
+    int tam_bloques = sb.s_blocks_count * 64;
+    ceros = new char[tam_bloques]();
+    disco.seekp(sb.s_block_start);
+    disco.write(ceros, tam_bloques);
+    
+    delete[] ceros;
+    disco.close();
+    
+    return "LOSS: Simulacion de perdida completa en particion " + id;
+}
+
 // ******** FUNCIONES DE REPORTES ********
 
 // GENERAR REPORTE MBR
@@ -4849,6 +4906,18 @@ string procesar_comando(const string& comando) {
         }
         
         return chmod(path, ugo, recursivo);
+    }
+
+    // LOSS: simulacion de perdida de sistema EXT3
+    else if (comando.find("loss") == 0) {
+        string id = "";
+        size_t pos = comando.find("-id=");
+        if (pos != string::npos) {
+            id = comando.substr(pos + 4);
+            id = id.substr(0, id.find(' '));
+        }
+        if (id.empty()) return "ERROR: Falta -id";
+        return loss(id);
     }
 
     // REP: Genaracion de reportes
