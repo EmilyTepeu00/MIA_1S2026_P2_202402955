@@ -3856,7 +3856,7 @@ string generarReporteInode(string path_disco, Superblock &sb, string path_salida
     
     dot << "digraph G {" << endl;
     dot << "  node [shape=record];" << endl;
-    dot << "  rankdir=LR;" << endl;
+    dot << "  rankdir=TB;" << endl;
     
     for (int i = 0; i < sb.s_inodes_count; i++) {
         // Leer bitmap para ver si esta usado
@@ -3870,52 +3870,46 @@ string generarReporteInode(string path_disco, Superblock &sb, string path_salida
             Inodo inodo;
             if (!leerInodo(path_disco, sb.s_inode_start, i, inodo)) continue;
             
-            // Nodo del INODO
-            dot << "  inodo" << i << " [label=\"{Inodo " << i << "|";
-            dot << "UID: " << inodo.i_uid << "|";
-            dot << "GID: " << inodo.i_gid << "|";
-            dot << "Size: " << inodo.i_size << "|";
-            dot << "Tipo: " << (inodo.i_type == 0 ? "Carpeta" : "Archivo") << "|";
-            dot << "Perm: " << inodo.i_perm[0] << inodo.i_perm[1] << inodo.i_perm[2] << "|";
-            dot << "{\\l";
+            char fecha_atime[30];
+            char fecha_ctime[30];
+            char fecha_mtime[30];
+            struct tm *tm_info;
+            
+            tm_info = localtime(&inodo.i_atime);
+            strftime(fecha_atime, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+            tm_info = localtime(&inodo.i_ctime);
+            strftime(fecha_ctime, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+            tm_info = localtime(&inodo.i_mtime);
+            strftime(fecha_mtime, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+            
+            dot << "  inodo" << i << " [label=\"{";
+            dot << "INODO " << i << " | ";
+            dot << "Tipo: " << (inodo.i_type == 0 ? "Carpeta" : "Archivo") << " | ";
+            dot << "UID: " << inodo.i_uid << " | ";
+            dot << "GID: " << inodo.i_gid << " | ";
+            dot << "Size: " << inodo.i_size << " bytes | ";
+            dot << "Permisos: " << inodo.i_perm[0] << inodo.i_perm[1] << inodo.i_perm[2] << " | ";
+            dot << "Creacion: " << fecha_ctime << " | ";
+            dot << "Modificacion: " << fecha_mtime << " | ";
+            dot << "Acceso: " << fecha_atime << " | ";
             
             // Bloques directos
+            dot << "Bloques directos: ";
             for (int j = 0; j < 12; j++) {
                 if (inodo.i_block[j] != -1) {
-                    dot << "Bloque directo " << j << ": " << inodo.i_block[j] << "\\l";
+                    dot << inodo.i_block[j] << " ";
+                } else {
+                    dot << "- ";
                 }
             }
+            dot << " | ";
             
             // Bloques indirectos
-            if (inodo.i_block[12] != -1) {
-                dot << "Simple indirecto: " << inodo.i_block[12] << "\\l";
-            }
-            if (inodo.i_block[13] != -1) {
-                dot << "Doble indirecto: " << inodo.i_block[13] << "\\l";
-            }
-            if (inodo.i_block[14] != -1) {
-                dot << "Triple indirecto: " << inodo.i_block[14] << "\\l";
-            }
+            dot << "Simple indirecto: " << (inodo.i_block[12] != -1 ? to_string(inodo.i_block[12]) : "-") << " | ";
+            dot << "Doble indirecto: " << (inodo.i_block[13] != -1 ? to_string(inodo.i_block[13]) : "-") << " | ";
+            dot << "Triple indirecto: " << (inodo.i_block[14] != -1 ? to_string(inodo.i_block[14]) : "-");
             
-            dot << "}}\"];" << endl;
-            
-            // Conectar con bloques directos
-            for (int j = 0; j < 12; j++) {
-                if (inodo.i_block[j] != -1) {
-                    dot << "  inodo" << i << " -> bloque" << inodo.i_block[j] << ";" << endl;
-                }
-            }
-            
-            // Conectar con bloques indirectos
-            if (inodo.i_block[12] != -1) {
-                dot << "  inodo" << i << " -> bloque" << inodo.i_block[12] << " [label=\"simple\"];" << endl;
-            }
-            if (inodo.i_block[13] != -1) {
-                dot << "  inodo" << i << " -> bloque" << inodo.i_block[13] << " [label=\"doble\"];" << endl;
-            }
-            if (inodo.i_block[14] != -1) {
-                dot << "  inodo" << i << " -> bloque" << inodo.i_block[14] << " [label=\"triple\"];" << endl;
-            }
+            dot << "}\"];" << endl;
         }
     }
     
@@ -3929,48 +3923,161 @@ string generarReporteInode(string path_disco, Superblock &sb, string path_salida
     return "Reporte INODE generado en " + path_salida;
 }
 
-// GENERAR REPORTE BLOCK (bloques usados)
-string generarReporteBlock(string path_disco, Superblock &sb, string path_salida) {
-    cout << "DEBUG: Generando block en: " << path_salida << endl;
-    
+// GENERAR REPORTE BLOCK (bloques usados con su contenido)
+string generarReporteBlock(string path_disco, Superblock &sb, string path_salida){
+
     string path_dot = path_salida + ".tmp.dot";
     ofstream dot(path_dot.c_str());
-    
-    dot << "digraph G {" << endl;
-    dot << "  node [shape=record];" << endl;
-    dot << "  rankdir=LR;" << endl;
-    
-    for (int i = 0; i < sb.s_blocks_count && i < 50; i++) { // Solo primeros 50 para no saturar
+
+    if(!dot.is_open()){
+        return "ERROR creando archivo DOT";
+    }
+
+    dot << "digraph G {\n";
+    // izquierda -> derecha
+    dot << "rankdir=LR;\n";
+    dot << "node [shape=plaintext];\n";
+
+    vector<int> bloques_usados;
+
+    for(int i=0; i<sb.s_blocks_count && i<100; i++){
         ifstream disco(path_disco, ios::binary);
         disco.seekg(sb.s_bm_block_start + i);
         char bit;
-        disco.read(&bit, 1);
+        disco.read(&bit,1);
         disco.close();
-        
-        if (bit == 1) {
-            dot << "  bloque" << i << " [label=\"{Bloque " << i << "|OCUPADO}\"];" << endl;
+
+        if(bit!=1)
+            continue;
+
+        bloques_usados.push_back(i);
+
+
+        // BLOQUE CARPETA
+        BloqueCarpeta bc;
+        if(leerBloqueCarpeta(path_disco,sb.s_block_start,i,bc)){
+            bool es_carpeta=false;
+
+            for(int j=0;j<4;j++){
+                if(bc.b_content[j].b_inodo!=-1){
+                    es_carpeta=true;
+                    break;
+                }
+            }
+
+            if(es_carpeta){
+                dot<<"bloque"<<i<<" [label=<\n";
+                dot<<"<TABLE BORDER='1' CELLBORDER='0' CELLSPACING='0' CELLPADDING='8'>\n";
+                dot<<"<TR>";
+                dot<<"<TD><B>Bloque Carpeta "<<i<<"</B></TD>";
+                dot<<"</TR>\n";
+                dot<<"<TR><TD ALIGN='LEFT'>";
+
+                for(int j=0;j<4;j++){
+                    if(bc.b_content[j].b_inodo!=-1){
+                        char nombre[13]={0};
+                        memcpy(nombre,bc.b_content[j].b_name,12);
+                        dot<<nombre
+                           <<"    "
+                           <<bc.b_content[j].b_inodo
+                           <<"<BR ALIGN='LEFT'/>";
+                    }
+                }
+
+                dot<<"</TD></TR>\n";
+                dot<<"</TABLE>\n";
+                dot<<">];\n";
+                continue;
+            }
+        }
+
+        // BLOQUE ARCHIVO
+        BloqueArchivo ba;
+        if(leerBloqueArchivo(path_disco,sb.s_block_start,i,ba)){
+            string contenido(ba.b_content,64);
+            bool tiene=false;
+
+            for(char c:contenido){
+                if(c!=0){
+                    tiene=true;
+                    break;
+                }
+            }
+
+            if(tiene){
+                dot<<"bloque"<<i<<" [label=<\n";
+                dot<<"<TABLE BORDER='1' CELLBORDER='0' CELLSPACING='0' CELLPADDING='8'>\n";
+                dot<<"<TR>";
+                dot<<"<TD><B>Bloque Archivo "<<i<<"</B></TD>";
+                dot<<"</TR>\n";
+                dot<<"<TR><TD ALIGN='LEFT'>";
+
+                for(int k=0;k<contenido.size();k+=20){
+                    string pedazo=
+                        contenido.substr(k,20);
+                    // quitar basura nula
+                    for(char &c:pedazo)
+                        if(c==0) c=' ';
+                    dot<<pedazo
+                       <<"<BR ALIGN='LEFT'/>";
+                }
+
+                dot<<"</TD></TR>\n";
+                dot<<"</TABLE>\n";
+                dot<<">];\n";
+                continue;
+            }
+        }
+
+
+
+        // BLOQUE APUNTADORES
+        BloqueApuntadores bp;
+        if(leerBloqueApuntadores(path_disco,sb.s_block_start,i,bp)){
+            dot<<"bloque"<<i<<" [label=<\n";
+            dot<<"<TABLE BORDER='1' CELLBORDER='0' CELLSPACING='0' CELLPADDING='8'>\n";
+            dot<<"<TR>";
+            dot<<"<TD><B>Bloque Apuntadores "<<i<<"</B></TD>";
+            dot<<"</TR>\n";
+            dot<<"<TR><TD ALIGN='LEFT'>";
+
+            for(int j=0;j<16;j++){
+                dot<<bp.b_pointers[j];
+                if(j<15)
+                    dot<<", ";
+                if((j+1)%6==0)
+                    dot<<"<BR ALIGN='LEFT'/>";
+            }
+
+            dot<<"</TD></TR>\n";
+            dot<<"</TABLE>\n";
+            dot<<">];\n";
+
         }
     }
-    
-    dot << "}" << endl;
-    dot.close();
-    
-    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_salida + "\" 2>&1";
-    cout << "EJECUTANDO: " << comando << endl;
-    system(comando.c_str());
-    
-    // Verificar si se creó
-    ifstream test(path_salida.c_str());
-    if (test.good()) {
-        cout << "Archivo creado: " << path_salida << endl;
-        test.close();
-    } else {
-        cout << "ERROR: No se creó el archivo" << endl;
+
+    // FLECHAS ENTRE BLOQUES
+    for(int i=0;i<(int)bloques_usados.size()-1;i++){
+        dot<<"bloque"
+           <<bloques_usados[i]
+           <<" -> bloque"
+           <<bloques_usados[i+1]
+           <<";\n";
     }
-    
+
+    dot<<"}\n";
+    dot.close();
+
+    string comando=
+        "dot -Tjpg \""+
+        path_dot+
+        "\" -o \""+
+        path_salida+
+        "\" 2>/dev/null";
+
+    system(comando.c_str());
     remove(path_dot.c_str());
-    
-    return "Reporte BLOCK generado en " + path_salida;
+    return "Reporte BLOCK generado en "+path_salida;
 }
 
 // GENERAR REPORTE BM_INODE (bitmap de inodos)
