@@ -3721,63 +3721,86 @@ string generarReporteMBR(string path_disco, string path_jpg){
     return "Reporte MBR generado en " + path_jpg;
 }
 
-// GENERAR REPORYE DISK
+// GENERAR REPORTE DISK
 string generarReporteDISK(string path_disco, string path_jpg) {
     MBR mbr;
     if (!leerMBR(path_disco, mbr)) {
         return "ERROR: No se pudo leer el MBR";
     }
-    
+
     string path_dot = path_jpg + ".tmp.dot";
     ofstream dot(path_dot.c_str());
-
+    
     dot << "digraph G {" << endl;
     dot << "  node [shape=record];" << endl;
-    dot << "  disk [label=\"";
+    dot << "  rankdir=LR;" << endl;
     
     int total = mbr.mbr_size;
     int inicio = sizeof(MBR);
     
+    // Recolectar particiones ordenadas por start
     vector<Partition> particiones;
     for (int i = 0; i < 4; i++) {
         if (mbr.mbr_partitions[i].part_size > 0) {
             particiones.push_back(mbr.mbr_partitions[i]);
         }
     }
-
-    for (int i = 0; i < particiones.size(); i++) {
-        for (int j = i + 1; j < particiones.size(); j++) {
+    
+    // Ordenar por part_start
+    for (size_t i = 0; i < particiones.size(); i++) {
+        for (size_t j = i + 1; j < particiones.size(); j++) {
             if (particiones[i].part_start > particiones[j].part_start) {
                 swap(particiones[i], particiones[j]);
             }
         }
     }
-
+    
+    string label = "{";
+    
+    // MBR al inicio
+    label += "MBR";
+    
+    // Espacio antes de primera particion
     if (!particiones.empty() && particiones[0].part_start > inicio) {
         int libre = particiones[0].part_start - inicio;
-        dot << "MBR|Libre " << (libre * 100 / total) << "%|";
-    } else {
-        dot << "MBR|";
+        int porcentaje = (libre * 100) / total;
+        label += "|Libre " + to_string(porcentaje) + "%";
     }
     
-    for (int i = 0; i < particiones.size(); i++) {
-        dot << particiones[i].part_name << " " << (particiones[i].part_size * 100 / total) << "%";
-        if (i < particiones.size() - 1) dot << "|";
+    // Particiones
+    for (size_t i = 0; i < particiones.size(); i++) {
+        int porcentaje = (particiones[i].part_size * 100) / total;
+        label += "|" + string(particiones[i].part_name) + " " + to_string(porcentaje) + "%";
+        
+        // Espacio entre particiones
+        if (i < particiones.size() - 1) {
+            int fin_actual = particiones[i].part_start + particiones[i].part_size;
+            int inicio_siguiente = particiones[i+1].part_start;
+            if (fin_actual < inicio_siguiente) {
+                int libre = inicio_siguiente - fin_actual;
+                int porcentaje_libre = (libre * 100) / total;
+                label += "|Libre " + to_string(porcentaje_libre) + "%";
+            }
+        }
     }
     
+    // Espacio despues de ultima particion
     if (!particiones.empty()) {
         int ultimo_fin = particiones.back().part_start + particiones.back().part_size;
         if (ultimo_fin < total) {
             int libre = total - ultimo_fin;
-            dot << "|Libre " << (libre * 100 / total) << "%";
+            int porcentaje = (libre * 100) / total;
+            label += "|Libre " + to_string(porcentaje) + "%";
         }
     }
     
-    dot << "\"];" << endl;
+    label += "}";
+    
+    dot << "  disk [label=\"" << label << "\"];" << endl;
     dot << "}" << endl;
     dot.close();
     
-    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_jpg + "\" 2>/dev/null";
+    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_jpg + "\"";
     system(comando.c_str());
     remove(path_dot.c_str());
     
@@ -4002,18 +4025,45 @@ string generarReporteSB(string path_disco, Superblock &sb, string path_salida) {
     ofstream dot(path_dot.c_str());
     
     dot << "digraph G {" << endl;
-    dot << "  node [shape=record];" << endl;
-    dot << "  sb [label=\"{SUPERBLOQUE|";
-    dot << "Inodos: " << sb.s_inodes_count << "|";
-    dot << "Bloques: " << sb.s_blocks_count << "|";
-    dot << "Libres inodos: " << sb.s_free_inodes_count << "|";
-    dot << "Libres bloques: " << sb.s_free_blocks_count << "|";
-    dot << "Magic: 0x" << hex << sb.s_magic << dec;
-    dot << "}\"];" << endl;
+    dot << "  node [shape=plaintext];" << endl;
+    dot << "  sb [label=<" << endl;
+    dot << "    <table border='1' cellborder='1' cellspacing='0' cellpadding='5'>" << endl;
+    dot << "      <tr><td bgcolor='lightgray' colspan='2'><b>REPORTE SUPERBLOQUE</b></td></tr>" << endl;
+    
+    // Datos del superbloque
+    dot << "      <tr><td bgcolor='lightblue'><b>s_filesystem_type</b></td><td>" << sb.s_filesystem_type << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_inodes_count</b></td><td>" << sb.s_inodes_count << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_blocks_count</b></td><td>" << sb.s_blocks_count << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_free_blocks_count</b></td><td>" << sb.s_free_blocks_count << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_free_inodes_count</b></td><td>" << sb.s_free_inodes_count << "</td></tr>" << endl;
+    
+    char fecha_m[30];
+    struct tm *tm_info = localtime(&sb.s_mtime);
+    strftime(fecha_m, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+    dot << "      <tr><td bgcolor='lightblue'><b>s_mtime</b></td><td>" << fecha_m << "</td></tr>" << endl;
+    
+    char fecha_um[30];
+    tm_info = localtime(&sb.s_umtime);
+    strftime(fecha_um, 30, "%d/%m/%Y %H:%M:%S", tm_info);
+    dot << "      <tr><td bgcolor='lightblue'><b>s_umtime</b></td><td>" << fecha_um << "</td></tr>" << endl;
+    
+    dot << "      <tr><td bgcolor='lightblue'><b>s_mnt_count</b></td><td>" << sb.s_mnt_count << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_magic</b></td><td>0x" << hex << sb.s_magic << dec << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_inode_size</b></td><td>" << sb.s_inode_size << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_block_size</b></td><td>" << sb.s_block_size << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_first_inode</b></td><td>" << sb.s_first_inode << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_first_block</b></td><td>" << sb.s_first_block << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_bm_inode_start</b></td><td>" << sb.s_bm_inode_start << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_bm_block_start</b></td><td>" << sb.s_bm_block_start << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_inode_start</b></td><td>" << sb.s_inode_start << "</td></tr>" << endl;
+    dot << "      <tr><td bgcolor='lightblue'><b>s_block_start</b></td><td>" << sb.s_block_start << "</td></tr>" << endl;
+    
+    dot << "    </table>" << endl;
+    dot << "  >];" << endl;
     dot << "}" << endl;
     dot.close();
     
-    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_salida + "\" 2>/dev/null";
+    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_salida + "\"";
     system(comando.c_str());
     remove(path_dot.c_str());
     
@@ -4035,73 +4085,64 @@ string generarReporteTree(string path_disco, Superblock &sb, string path_salida)
     dot << "}" << endl;
     dot.close();
     
-    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_salida + "\" 2>&1";
+    string comando = "dot -Tjpg \"" + path_dot + "\" -o \"" + path_salida + "\"";
     system(comando.c_str());
     remove(path_dot.c_str());
     
     return "Reporte TREE generado en " + path_salida;
 }
 
-// GENERAR REPORTE FILE (Contenido de archivo)
+// GENERAR REPORTE FILE (contenido de archivo)
 string generarReporteFile(string path_disco, Superblock &sb, string path_salida, string path_file) {
-    // Verificar que se especificó el archivo
     if (path_file.empty()) {
         return "ERROR: Falta especificar el archivo con -path_file_ls";
     }
     
-    // Leer contenido del archivo usando la función que ya tienes
+    // Cambiar extensión a .txt
+    string path_txt = path_salida;
+    size_t pos = path_txt.find_last_of('.');
+    if (pos != string::npos) {
+        path_txt = path_txt.substr(0, pos) + ".txt";
+    }
+    
     string contenido = leerArchivoCompleto(path_disco, sb, path_file);
     
     if (contenido.empty()) {
-        return "ERROR: No se pudo leer el archivo '" + path_file + "' (no existe o no es archivo)";
+        return "ERROR: No se pudo leer el archivo '" + path_file + "'";
     }
     
-    // Asegurar que la extensión sea .txt
-    string path_real = path_salida;
-    // Si termina en .jpg, cambiarlo a .txt
-    if (path_real.length() > 4 && path_real.substr(path_real.length()-4) == ".jpg") {
-        path_real = path_real.substr(0, path_real.length()-4) + ".txt";
-    }
-    // Si termina en .png, cambiarlo a .txt
-    else if (path_real.length() > 4 && path_real.substr(path_real.length()-4) == ".png") {
-        path_real = path_real.substr(0, path_real.length()-4) + ".txt";
-    }
-    
-    // Guardar en archivo de texto
-    ofstream txt(path_real.c_str());
+    ofstream txt(path_txt.c_str());
     if (!txt.is_open()) {
-        return "ERROR: No se pudo crear el archivo de salida: " + path_real;
+        return "ERROR: No se pudo crear el archivo: " + path_txt;
     }
     
     txt << "=== CONTENIDO DE: " << path_file << " ===" << endl;
     txt << contenido << endl;
     txt.close();
     
-    cout << "DEBUG: Archivo FILE generado en: " << path_real << endl;
+    // Abrir el archivo
+    string comando = "xdg-open \"" + path_txt + "\"";
+    system(comando.c_str());
     
-    return "Reporte FILE generado en " + path_real;
+    return "Reporte FILE generado en " + path_txt;
 }
 
-// GENERAR REPORTE LS (listado detallado)
+// GENERAR REPORTE LS
 string generarReporteLS(string path_disco, Superblock &sb, string path_salida, string path_dir) {
-    // Si no sse especifica el directorio, usar raiz
     if (path_dir.empty()) {
         path_dir = "/";
     }
     
-    // Buscar inodo del directorio
     int inodo_dir = buscarInodoPorRuta(path_disco, sb.s_inode_start, sb.s_block_start, path_dir);
     if (inodo_dir == -1) {
         return "ERROR: No existe el directorio: " + path_dir;
     }
     
-    // Leer inodo del directorio
     Inodo dir_inodo;
     if (!leerInodo(path_disco, sb.s_inode_start, inodo_dir, dir_inodo)) {
-        return "ERROR: No se pudo leer el inodo del directorio";
+        return "ERROR: No se pudo leer el inodo";
     }
     
-    // Verificar que sea directorio
     if (dir_inodo.i_type != 0) {
         return "ERROR: La ruta no es un directorio";
     }
@@ -4112,45 +4153,53 @@ string generarReporteLS(string path_disco, Superblock &sb, string path_salida, s
     dot << "digraph G {" << endl;
     dot << "  node [shape=plaintext];" << endl;
     dot << "  ls [label=<" << endl;
-    dot << "    <table border='1' cellborder='1' cellspacing='0'>" << endl;
-    dot << "    <tr>" << endl;
-    dot << "      <td><b>Permisos</b></td>" << endl;
-    dot << "      <td><b>Owner</b></td>" << endl;
-    dot << "      <td><b>Grupo</b></td>" << endl;
-    dot << "      <td><b>Tamaño</b></td>" << endl;
-    dot << "      <td><b>Fecha</b></td>" << endl;
-    dot << "      <td><b>Tipo</b></td>" << endl;
-    dot << "      <td><b>Nombre</b></td>" << endl;
-    dot << "    </tr>" << endl;
+    dot << "    <table border='1' cellborder='1' cellspacing='0' cellpadding='5'>" << endl;
+    
+    // Titulo
+    dot << "      <tr><td bgcolor='lightgray' colspan='8'><b>REPORTE LS - " << path_dir << "</b></td></tr>" << endl;
+    
+    // Encabezados de columna
+    dot << "      <tr>";
+    dot << "<td bgcolor='lightblue'><b>Permisos</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Owner</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Grupo</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Size (bytes)</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Fecha</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Hora</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Tipo</b></td>";
+    dot << "<td bgcolor='lightblue'><b>Name</b></td>";
+    dot << "</tr>" << endl;
     
     // Recorrer bloques del directorio
     for (int i = 0; i < 12 && dir_inodo.i_block[i] != -1; i++) {
         BloqueCarpeta bloque;
-        if (!leerBloqueCarpeta(path_disco, sb.s_block_start, dir_inodo.i_block[i], bloque)) continue;
-        
-        for (int j = 0; j < 4; j++) {
-            if (bloque.b_content[j].b_inodo != -1) {
-                string nombre(bloque.b_content[j].b_name);
-                if (nombre == "." || nombre == "..") continue;  // Ignorar . y ..
-                
-                int inodo_hijo = bloque.b_content[j].b_inodo;
-                Inodo hijo;
-                if (!leerInodo(path_disco, sb.s_inode_start, inodo_hijo, hijo)) continue;
-                
-                // Formatear fecha
-                char fecha[20];
-                struct tm *tm_info = localtime(&hijo.i_ctime);
-                strftime(fecha, 20, "%d/%m/%Y %H:%M", tm_info);
-                
-                dot << "    <tr>" << endl;
-                dot << "      <td>" << hijo.i_perm[0] << hijo.i_perm[1] << hijo.i_perm[2] << "</td>" << endl;
-                dot << "      <td>" << hijo.i_uid << "</td>" << endl;
-                dot << "      <td>" << hijo.i_gid << "</td>" << endl;
-                dot << "      <td>" << hijo.i_size << "</td>" << endl;
-                dot << "      <td>" << fecha << "</td>" << endl;
-                dot << "      <td>" << (hijo.i_type == 0 ? "DIR" : "FILE") << "</td>" << endl;
-                dot << "      <td>" << nombre << "</td>" << endl;
-                dot << "    </tr>" << endl;
+        if (leerBloqueCarpeta(path_disco, sb.s_block_start, dir_inodo.i_block[i], bloque)) {
+            for (int j = 0; j < 4; j++) {
+                if (bloque.b_content[j].b_inodo != -1) {
+                    string nombre(bloque.b_content[j].b_name);
+                    if (nombre == "." || nombre == "..") continue;
+                    
+                    int inodo_hijo = bloque.b_content[j].b_inodo;
+                    Inodo hijo;
+                    if (!leerInodo(path_disco, sb.s_inode_start, inodo_hijo, hijo)) continue;
+                    
+                    char fecha[20];
+                    char hora[20];
+                    struct tm *tm_info = localtime(&hijo.i_ctime);
+                    strftime(fecha, 20, "%d/%m/%Y", tm_info);
+                    strftime(hora, 20, "%H:%M:%S", tm_info);
+                    
+                    dot << "      <tr>";
+                    dot << "<td>" << hijo.i_perm[0] << hijo.i_perm[1] << hijo.i_perm[2] << "</td>";
+                    dot << "<td>" << hijo.i_uid << "</td>";
+                    dot << "<td>" << hijo.i_gid << "</td>";
+                    dot << "<td>" << hijo.i_size << "</td>";
+                    dot << "<td>" << fecha << "</td>";
+                    dot << "<td>" << hora << "</td>";
+                    dot << "<td>" << (hijo.i_type == 0 ? "DIR" : "FILE") << "</td>";
+                    dot << "<td>" << nombre << "</td>";
+                    dot << "</tr>" << endl;
+                }
             }
         }
     }
@@ -4166,7 +4215,6 @@ string generarReporteLS(string path_disco, Superblock &sb, string path_salida, s
     
     return "Reporte LS generado en " + path_salida;
 }
-
 
 // --- FUNCION: rep (generar reportes) ---
 string rep(string name, string path, string id, string path_file_ls) {
