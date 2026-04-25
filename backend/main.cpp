@@ -8,6 +8,8 @@
 #include <cstdlib>
 #include <sstream>
 #include <vector>
+#include <map>
+#include <set>
 
 // Libreria Crow para API REST
 #include "crow.h"
@@ -208,6 +210,7 @@ struct Montada {
 
 // VARIABLES GLOBALES
 vector<Montada> particiones_montadas;
+map<string, int> disco_contador;
 int contador_por_letra[26] = {0};
 
 
@@ -342,6 +345,29 @@ bool escribirEBR(string path, int pos, EBR &ebr) {
     return true;
 }
 
+// --- FUNCION: buscarParticionLogica ---
+bool buscarParticionLogica(string path_disco, int start_extendida, string nombre, int &part_start, int &part_size) {
+    int ebr_pos = start_extendida;
+    EBR ebr;
+    
+    while (ebr_pos != -1) {
+        if (!leerEBR(path_disco, ebr_pos, ebr)) {
+            break;
+        }
+        
+        string nombre_ebr(ebr.part_name);
+        if (nombre_ebr == nombre) {
+            part_start = ebr.part_start;
+            part_size = ebr.part_size;
+            return true;
+        }
+        
+        ebr_pos = ebr.part_next;
+    }
+    
+    return false;
+}
+
 // --- FUNCION: crearEBRInicial ---
 bool crearEBRInicial(string path, int start, int size, string fit, string name) {
     EBR nuevo_ebr;
@@ -364,34 +390,29 @@ bool crearEBRInicial(string path, int start, int size, string fit, string name) 
 
 // --- FUNCION: generarID ---
 string generarID(string path_disco) {
-    // Contar cuántas particiones de este disco ya están montadas
-    int contador = 0;
-    char letra = 'A';
+    static map<string, int> disco_contador;
+    static map<string, char> disco_letra;
+    static char letra_global = 'A';
     
-    for (const auto& m : particiones_montadas) {
-        if (m.path_disco == path_disco) {
-            contador++;
-            // La letra será la del último montaje
-            if (m.id.length() >= 4) {
-                letra = m.id[3];
-            }
-        }
+    // Si es un nuevo disco, asignarle una letra
+    if (disco_letra.find(path_disco) == disco_letra.end()) {
+        disco_letra[path_disco] = letra_global;
+        letra_global++;
     }
     
-    // Si no hay montajes previos, empezar con A y contador 1
-    if (contador == 0) {
-        return "551A";
-    }
+    // Incrementar contador para este disco
+    disco_contador[path_disco]++;
     
-    // Si ya hay montajes, aumentar contador
-    int nuevo_num = contador + 1;
-    string num_str;
-    if (nuevo_num < 10) {
-        num_str = "0" + to_string(nuevo_num);
-    } else {
-        num_str = to_string(nuevo_num);
-    }
+    // Numero de particion (sin cero extra)
+    int num = disco_contador[path_disco];
     
+    // Formatear numero: 1 -> "1", no "01"
+    string num_str = to_string(num);
+    
+    // Obtener la letra para este disco
+    char letra = disco_letra[path_disco];
+    
+    // Construir ID: 55 + numero + letra
     return "55" + num_str + letra;
 }
 
@@ -884,23 +905,28 @@ bool crearCarpetasPadre(string path_disco, Superblock &sb, string ruta, int uid,
 
 // --- FUNCION: leerArchivoCompleto ---
 string leerArchivoCompleto(string path_disco, Superblock &sb, string ruta) {
+    cout << "DEBUG leerArchivoCompleto: buscando " << ruta << endl;
+    
     // Buscar inodo del archivo
     int inodo_pos = buscarInodoPorRuta(path_disco, sb.s_inode_start, sb.s_block_start, ruta);
+    cout << "DEBUG leerArchivoCompleto: inodo_pos = " << inodo_pos << endl;
+    
     if (inodo_pos == -1) {
+        cout << "DEBUG leerArchivoCompleto: archivo no encontrado" << endl;
         return "";  // Archivo no existe
     }
     
     Inodo inodo;
     if (!leerInodo(path_disco, sb.s_inode_start, inodo_pos, inodo)) {
+        cout << "DEBUG leerArchivoCompleto: error al leer inodo" << endl;
         return "";
     }
     
     // Verificar que sea un archivo
     if (inodo.i_type != 1) {
+        cout << "DEBUG leerArchivoCompleto: no es un archivo (es carpeta)" << endl;
         return "";  // No es archivo
     }
-    
-    // Verificar permisos de lectura
     
     string contenido = "";
     int bytes_por_leer = inodo.i_size;
@@ -918,7 +944,7 @@ string leerArchivoCompleto(string path_disco, Superblock &sb, string ruta) {
         bytes_por_leer -= copiar;
     }
     
-    // Leer bloques indirectos para archivos grandes
+    cout << "DEBUG leerArchivoCompleto: contenido length = " << contenido.length() << endl;
     
     return contenido;
 }
@@ -1500,6 +1526,9 @@ string mount(string path, string name) {
     }
     
     int idx = -1;
+    int extendida_start = -1;
+    
+    // Buscar en particiones primarias
     for (int i = 0; i < 4; i++) {
         if (mbr.mbr_partitions[i].part_size > 0) {
             string nombre_actual(mbr.mbr_partitions[i].part_name);
@@ -1507,13 +1536,33 @@ string mount(string path, string name) {
                 idx = i;
                 break;
             }
+            if (mbr.mbr_partitions[i].part_type == 'E') {
+                extendida_start = mbr.mbr_partitions[i].part_start;
+            }
         }
     }
     
-    if (idx == -1) {
+    int part_start = -1;
+    int part_size = 0;
+    char part_type = 'P';
+    
+    if (idx != -1) {
+        // Es particion primaria
+        part_start = mbr.mbr_partitions[idx].part_start;
+        part_size = mbr.mbr_partitions[idx].part_size;
+        part_type = mbr.mbr_partitions[idx].part_type;
+    } else if (extendida_start != -1) {
+        // Buscar en particiones logicas
+        if (buscarParticionLogica(path, extendida_start, name, part_start, part_size)) {
+            part_type = 'L';
+        } else {
+            return "ERROR: No existe una particion con nombre '" + name + "'";
+        }
+    } else {
         return "ERROR: No existe una particion con nombre '" + name + "'";
     }
     
+    // Verificar si ya esta montada
     for (const auto& m : particiones_montadas) {
         if (m.path_disco == path && m.nombre_particion == name) {
             return "ERROR: La particion ya esta montada";
@@ -1522,20 +1571,24 @@ string mount(string path, string name) {
     
     string id_generado = generarID(path);
     
-    mbr.mbr_partitions[idx].part_status = '1';
-    strcpy(mbr.mbr_partitions[idx].part_id, id_generado.c_str());
-    
-    if (!escribirMBR(path, mbr)) {
-        return "ERROR: No se pudo actualizar el MBR";
+    // Actualizar MBR solo si es primaria
+    if (idx != -1) {
+        mbr.mbr_partitions[idx].part_status = '1';
+        mbr.mbr_partitions[idx].part_correlative = disco_contador[path];
+        strcpy(mbr.mbr_partitions[idx].part_id, id_generado.c_str());
+        
+        if (!escribirMBR(path, mbr)) {
+            return "ERROR: No se pudo actualizar el MBR";
+        }
     }
     
     Montada nueva;
     nueva.path_disco = path;
     nueva.nombre_particion = name;
     nueva.id = id_generado;
-    nueva.part_start = mbr.mbr_partitions[idx].part_start;
-    nueva.part_size = mbr.mbr_partitions[idx].part_size;
-    nueva.part_type = mbr.mbr_partitions[idx].part_type;
+    nueva.part_start = part_start;
+    nueva.part_size = part_size;
+    nueva.part_type = part_type;
     
     particiones_montadas.push_back(nueva);
     
@@ -2533,6 +2586,7 @@ string chgrp(string user, string grp) {
     }
 }
 
+
 // --- FUNCION: MKFILE (crear archivo) ---
 string mkfile(string path, bool r, int size, string cont) {
     // Verificar sesion activa
@@ -2583,21 +2637,32 @@ string mkfile(string path, bool r, int size, string cont) {
         return "ERROR: La carpeta padre no existe (use -r para crearla)";
     }
     
-    // Verificar permisos de escritura en carpeta padre
-    
     // Obtener contenido del archivo
     string contenido;
     
     if (!cont.empty()) {
-        // Leer de archivo en disco real
-        ifstream archivo_origen(cont.c_str());
-        if (!archivo_origen.is_open()) {
-            return "ERROR: No se pudo leer el archivo de origen: " + cont;
+        cout << "DEBUG mkfile: cont = " << cont << endl;
+        
+        // Verificar si la ruta es dentro del disco virtual (empieza con /)
+        if (cont[0] == '/') {
+            cout << "DEBUG mkfile: leyendo archivo virtual: " << cont << endl;
+            contenido = leerArchivoCompleto(m.path_disco, sb, cont);
+            cout << "DEBUG mkfile: contenido length de leerArchivoCompleto = " << contenido.length() << endl;
+            if (contenido.empty()) {
+                return "ERROR: No se pudo leer el archivo virtual: " + cont;
+            }
+        } else {
+            cout << "DEBUG mkfile: leyendo archivo real: " << cont << endl;
+            ifstream archivo_origen(cont.c_str());
+            if (!archivo_origen.is_open()) {
+                return "ERROR: No se pudo leer el archivo de origen: " + cont;
+            }
+            stringstream buffer;
+            buffer << archivo_origen.rdbuf();
+            contenido = buffer.str();
+            archivo_origen.close();
+            cout << "DEBUG mkfile: contenido length de archivo real = " << contenido.length() << endl;
         }
-        stringstream buffer;
-        buffer << archivo_origen.rdbuf();
-        contenido = buffer.str();
-        archivo_origen.close();
     } else if (size > 0) {
         // Generar contenido numerico 0-9
         for (int i = 0; i < size; i++) {
@@ -2605,6 +2670,7 @@ string mkfile(string path, bool r, int size, string cont) {
         }
     }
     
+    cout << "DEBUG mkfile: contenido final length = " << contenido.length() << endl;
     int tamano_contenido = contenido.length();
     
     // Buscar inodo libre
@@ -2622,15 +2688,14 @@ string mkfile(string path, bool r, int size, string cont) {
     nuevo_inodo.i_ctime = time(nullptr);
     nuevo_inodo.i_mtime = time(nullptr);
     nuevo_inodo.i_type = 1;  // Archivo
-    nuevo_inodo.i_perm[0] = '6';  // 6 = rw-
-    nuevo_inodo.i_perm[1] = '6';  // 6 = rw-
-    nuevo_inodo.i_perm[2] = '4';  // 4 = r--
+    nuevo_inodo.i_perm[0] = '6';
+    nuevo_inodo.i_perm[1] = '6';
+    nuevo_inodo.i_perm[2] = '4';
     
     // Calcular bloques necesarios
-    int bloques_necesarios = (tamano_contenido + 63) / 64;  // Redondear hacia arriba
+    int bloques_necesarios = (tamano_contenido + 63) / 64;
     
     // Asignar bloques directos
-    int bloque_actual = 0;
     int pos = 0;
     
     for (int i = 0; i < min(bloques_necesarios, 12); i++) {
@@ -2642,7 +2707,6 @@ string mkfile(string path, bool r, int size, string cont) {
         nuevo_inodo.i_block[i] = bloque_libre;
         marcarBitBloque(m.path_disco, sb.s_bm_block_start, sb.s_blocks_count, bloque_libre);
         
-        // Escribir bloque
         BloqueArchivo bloque;
         memset(bloque.b_content, 0, 64);
         int copiar = min(64, tamano_contenido - pos);
@@ -2653,10 +2717,7 @@ string mkfile(string path, bool r, int size, string cont) {
         }
         
         pos += copiar;
-        bloque_actual++;
     }
-    
-    // Implementar bloques indirectos para archivos grandes
     
     // Marcar inodo como ocupado y escribirlo
     marcarBitInodo(m.path_disco, sb.s_bm_inode_start, sb.s_inodes_count, nuevo_inodo_pos);
@@ -2678,10 +2739,8 @@ string mkfile(string path, bool r, int size, string cont) {
             continue;
         }
         
-        // Buscar entrada libre
         for (int j = 0; j < 4; j++) {
             if (bloque_carpeta.b_content[j].b_inodo == -1) {
-                // Espacio libre encontrado
                 strcpy(bloque_carpeta.b_content[j].b_name, nombre_archivo.c_str());
                 bloque_carpeta.b_content[j].b_inodo = nuevo_inodo_pos;
                 
@@ -2695,14 +2754,13 @@ string mkfile(string path, bool r, int size, string cont) {
         if (entrada_agregada) break;
     }
     
-    // Si no hay espacio en bloques existentes, asignar nuevo bloque de carpeta
+    // Si no hay espacio, asignar nuevo bloque de carpeta
     if (!entrada_agregada) {
         int nuevo_bloque_carpeta = obtenerBloqueLibre(m.path_disco, sb.s_bm_block_start, sb.s_blocks_count);
         if (nuevo_bloque_carpeta == -1) {
             return "ERROR: No hay bloques para expandir carpeta";
         }
         
-        // Asignar bloque a la carpeta padre
         for (int i = 0; i < 12; i++) {
             if (inodo_padre_obj.i_block[i] == -1) {
                 inodo_padre_obj.i_block[i] = nuevo_bloque_carpeta;
@@ -2711,7 +2769,6 @@ string mkfile(string path, bool r, int size, string cont) {
             }
         }
         
-        // Crear nuevo bloque con la entrada
         BloqueCarpeta nuevo_bloque;
         memset(&nuevo_bloque, 0, sizeof(BloqueCarpeta));
         for (int j = 0; j < 4; j++) {
@@ -2724,7 +2781,6 @@ string mkfile(string path, bool r, int size, string cont) {
             return "ERROR: No se pudo escribir nuevo bloque de carpeta";
         }
         
-        // Actualizar inodo padre
         if (!escribirInodo(m.path_disco, sb.s_inode_start, inodo_padre, inodo_padre_obj)) {
             return "ERROR: No se pudo actualizar inodo padre";
         }
@@ -2732,7 +2788,7 @@ string mkfile(string path, bool r, int size, string cont) {
     
     // Registrar en journal (si es EXT3)
     registrarEnJournal(m.path_disco, m.part_start, "CREATE", path, contenido);
-
+    
     return "MKFILE: Archivo '" + path + "' creado (" + to_string(tamano_contenido) + " bytes)";
 }
 
@@ -3359,7 +3415,7 @@ string find(string path, string name) {
     stringstream resultado;
     resultado << "=== BUSQUEDA: " << name << " en " << path << " ===\n";
     
-    // Función recursiva para buscar
+    // Funcion recursiva para buscar
     function<void(int, string)> buscar = [&](int inodo_actual, string ruta_actual) {
         Inodo inodo;
         if (!leerInodo(m.path_disco, sb.s_inode_start, inodo_actual, inodo)) return;
@@ -5122,9 +5178,11 @@ string procesar_comando(const string& comando) {
 
     // CHOWN: Cambiar propietario
     else if (comando.find("chown") == 0) {
-        string path = "", usuario = "";
+        string path = "";
+        string usuario = "";
         bool recursivo = false;
         
+        // Extraer -path
         size_t pos = comando.find("-path=");
         if (pos != string::npos) {
             string valor = comando.substr(pos + 6);
@@ -5136,9 +5194,10 @@ string procesar_comando(const string& comando) {
             }
         }
         
-        pos = comando.find("-usuario=");
+        // Extraer -user (no -usuario, es -user)
+        pos = comando.find("-user=");
         if (pos != string::npos) {
-            string valor = comando.substr(pos + 9);
+            string valor = comando.substr(pos + 6);
             if (valor[0] == '"') {
                 size_t cierre = valor.find('"', 1);
                 usuario = valor.substr(1, cierre - 1);
@@ -5147,12 +5206,17 @@ string procesar_comando(const string& comando) {
             }
         }
         
+        // Extraer -r (recursivo)
         if (comando.find("-r") != string::npos) {
             recursivo = true;
         }
         
-        if (path.empty() || usuario.empty()) {
-            return "ERROR: Faltan parametros para CHOWN";
+        // Validar
+        if (path.empty()) {
+            return "ERROR: Falta parametro -path para CHOWN";
+        }
+        if (usuario.empty()) {
+            return "ERROR: Falta parametro -user para CHOWN";
         }
         
         return chown(path, usuario, recursivo);
@@ -5327,8 +5391,8 @@ string obtenerDiscos() {
     stringstream res;
     res << "[";
     
-    // Buscar archivos .mia en la carpeta discos
-    string comando = "ls ../discos/*.mia 2>/dev/null";
+    // Buscar archivos .mia en la carpeta Pruebas_MIA
+    string comando = "ls /home/emily-tepeu/Pruebas_MIA/*.mia 2>/dev/null";
     char buffer[128];
     string resultado = "";
     FILE* pipe = popen(comando.c_str(), "r");
@@ -5346,7 +5410,6 @@ string obtenerDiscos() {
     vector<string> discos;
     while (getline(ss, linea)) {
         if (!linea.empty()) {
-            // Eliminar el salto de línea correctamente
             if (linea.back() == '\n') linea.pop_back();
             if (linea.back() == '\r') linea.pop_back();
             discos.push_back(linea);
