@@ -1977,7 +1977,7 @@ string login(string user, string pass, string id) {
         
         return "ERROR: Usuario o contraseña incorrectos";
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en login: " + string(e.what());
+        return "ERROR: Excepcion en login: " + string(e.what());
     }
 }
 
@@ -2083,9 +2083,12 @@ string mkgrp(string name) {
             return "ERROR: No se pudo actualizar users.txt";
         }
         
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "MKGRP", name, "");
+        
         return "MKGRP: Grupo '" + name + "' creado con GID " + to_string(nuevo_gid);
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en mkgrp: " + string(e.what());
+        return "ERROR: Excepcion en mkgrp: " + string(e.what());
     }
 }
 
@@ -2230,9 +2233,12 @@ string rmgrp(string name) {
             return "ERROR: No se pudo actualizar users.txt";
         }
         
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "RMGRP", name, "");
+        
         return "RMGRP: Grupo '" + name + "' eliminado (GID " + to_string(gid_eliminar) + ")";
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en rmgrp: " + string(e.what());
+        return "ERROR: Excepcion en rmgrp: " + string(e.what());
     }
 }
 
@@ -2373,9 +2379,12 @@ string mkusr(string user, string pass, string grp) {
             return "ERROR: No se pudo actualizar users.txt";
         }
         
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "MKUSR", user, "");
+        
         return "MKUSR: Usuario '" + user + "' creado con UID " + to_string(nuevo_uid);
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en mkusr: " + string(e.what());
+        return "ERROR: Excepcion en mkusr: " + string(e.what());
     }
 }
 
@@ -2462,9 +2471,12 @@ string rmusr(string user) {
             return "ERROR: No se pudo actualizar users.txt";
         }
         
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "RMUSR", user, "");
+        
         return "RMUSR: Usuario '" + user + "' eliminado (UID " + to_string(uid_eliminado) + ")";
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en rmusr: " + string(e.what());
+        return "ERROR: Excepcion en rmusr: " + string(e.what());
     }
 }
 
@@ -2580,9 +2592,12 @@ string chgrp(string user, string grp) {
             return "ERROR: No se pudo actualizar users.txt";
         }
         
+        // Registrar en journal (si es EXT3)
+        registrarEnJournal(m.path_disco, m.part_start, "CHGRP", user + " -> " + grp, "");
+        
         return "CHGRP: Usuario '" + user + "' ahora pertenece al grupo '" + grp + "'";
     } catch (const std::exception& e) {
-        return "ERROR: Excepción en chgrp: " + string(e.what());
+        return "ERROR: Excepcion en chgrp: " + string(e.what());
     }
 }
 
@@ -2888,6 +2903,14 @@ string cat(vector<string> archivos) {
             resultado += contenido + "\n\n";
         }
     }
+    
+    // Registrar en journal (si es EXT3)
+    string archivos_str;
+    for (size_t i = 0; i < archivos.size(); i++) {
+        if (i > 0) archivos_str += ", ";
+        archivos_str += archivos[i];
+    }
+    registrarEnJournal(m.path_disco, m.part_start, "CAT", archivos_str, "");
     
     return resultado;
 }
@@ -3280,6 +3303,7 @@ string moveItem(string path_origen, string path_destino) {
         }
     }
     
+        // Registrar en journal (si es EXT3)
     registrarEnJournal(m.path_disco, m.part_start, "MOVE", path_origen + " -> " + ruta_destino_completa, "");
     
     return "MOVE: '" + path_origen + "' movido a '" + ruta_destino_completa + "' exitosamente";
@@ -3463,6 +3487,9 @@ string find(string path, string name) {
     
     buscar(inodo_inicio, path);
     
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "FIND", path + " -> " + name, "");
+    
     return resultado.str();
 }
 
@@ -3531,6 +3558,9 @@ string chown(string path, string usuario, bool recursivo) {
         return "ERROR: No se pudo escribir inodo";
     }
     
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "CHOWN", path + " -> " + usuario, "");
+    
     return "CHOWN: Propietario de '" + path + "' cambiado a '" + usuario + "'";
 }
 
@@ -3589,6 +3619,9 @@ string chmod(string path, string ugo, bool recursivo) {
     if (!escribirInodo(m.path_disco, sb.s_inode_start, inodo, inodo_obj)) {
         return "ERROR: No se pudo escribir inodo";
     }
+    
+    // Registrar en journal (si es EXT3)
+    registrarEnJournal(m.path_disco, m.part_start, "CHMOD", path + " -> " + ugo, "");
     
     return "CHMOD: Permisos de '" + path + "' cambiados a " + ugo;
 }
